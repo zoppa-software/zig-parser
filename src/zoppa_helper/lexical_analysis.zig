@@ -42,6 +42,11 @@ pub const WordType = enum {
     Colon, // コロン
     Backslash, // バックスラッシュ
     StringLiteral, // 文字列リテラル
+    TrueLiteral, // 真
+    FalseLiteral, // 偽
+    AndOperator, // 論理積
+    OrOperator, // 論理和
+    XorOperator, // 排他的論理和
 };
 
 /// 単語を表す構造体。
@@ -58,6 +63,8 @@ pub fn splitWords(input: *const String, allocator: Allocator) ![]Word {
     var tokens = ArrayList(Word).init(allocator);
     defer tokens.deinit();
 
+    const split_char = createSplitChar();
+
     var iter = input.iterate();
     while (iter.hasNext()) {
         const pc = iter.peek();
@@ -65,7 +72,7 @@ pub fn splitWords(input: *const String, allocator: Allocator) ![]Word {
             if (c.isWhiteSpace() or c.len > 1) {
                 _ = iter.next();
             } else {
-                const word = switchOneCharToWord(input, &iter, c) catch {
+                const word = switchOneCharToWord(&split_char, input, &iter, c) catch {
                     return LexicalError.WordAnalysisError;
                 };
                 try tokens.append(word);
@@ -76,14 +83,10 @@ pub fn splitWords(input: *const String, allocator: Allocator) ![]Word {
     return tokens.toOwnedSlice();
 }
 
-var split_char: [256]bool = [1]bool{false} ** 256;
-
-/// 1文字のトークンを解析して、Word構造体に変換します。
-/// 文字の種類に応じて、適切なWordTypeを設定します。
-/// 文字が演算子や記号の場合は、対応するWordTypeを設定します。
-/// 文字が数字の場合は、数字のトークンを作成します。
-/// 文字が文字列リテラルの場合は、文字列リテラルのトークンを作成します。
-fn switchOneCharToWord(input: *const String, iter: *String.Iterator, c: Char) !Word {
+/// 分割文字を定義します。
+/// 文字列をトークンに分割する際に使用される文字のリストです。
+fn createSplitChar() [256]bool {
+    var split_char: [256]bool = [1]bool{false} ** 256;
     split_char[' '] = true;
     split_char['\t'] = true;
     split_char['\n'] = true;
@@ -110,169 +113,153 @@ fn switchOneCharToWord(input: *const String, iter: *String.Iterator, c: Char) !W
     split_char['\''] = true;
     split_char['"'] = true;
 
-    var res: Word = undefined;
-    switch (c.source[0]) {
-        '\\' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Backslash };
-            _ = iter.next();
-        },
-        '.' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Period };
-            _ = iter.next();
-        },
-        '=' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Equal };
-            _ = iter.next();
-        },
-        '<' => {
-            var twoword = false;
-            if (iter.skip(1)) |lc| {
-                if (lc.len == 1) {
-                    switch (c.source[0]) {
-                        '=' => {
-                            // <= 演算子
-                            res = .{ .str = String.newSlice(input.raw(), iter.index, 2), .kind = WordType.LessEqual };
-                            twoword = true;
-                        },
-                        '>' => {
-                            // <> 演算子
-                            res = .{ .str = String.newSlice(input.raw(), iter.index, 2), .kind = WordType.NotEqual };
-                            twoword = true;
-                        },
-                        else => {},
-                    }
-                }
-            }
-            if (twoword) {
-                _ = iter.next();
-            } else {
-                // 単なる < 演算子
-                res = .{ .str = getOneCharString(input, iter), .kind = WordType.LessThan };
-            }
-            _ = iter.next();
-        },
-        '>' => {
-            var twoword = false;
-            if (iter.skip(1)) |lc| {
-                if (lc.len == 1) {
-                    switch (c.source[0]) {
-                        '=' => {
-                            // >= 演算子
-                            res = .{ .str = String.newSlice(input.raw(), iter.index, 2), .kind = WordType.GreaterEqual };
-                            twoword = true;
-                        },
-                        else => {},
-                    }
-                }
-            }
-            if (twoword) {
-                _ = iter.next();
-            } else {
-                // 単なる < 演算子
-                res = .{ .str = getOneCharString(input, iter), .kind = WordType.GreaterThan };
-            }
-            _ = iter.next();
-        },
-        '+' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Plus };
-            _ = iter.next();
-        },
-        '-' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Minus };
-            _ = iter.next();
-        },
-        '*' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Multiply };
-            _ = iter.next();
-        },
-        '/' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Devision };
-            _ = iter.next();
-        },
-        '(' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.LeftParen };
-            _ = iter.next();
-        },
-        ')' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.RightParen };
-            _ = iter.next();
-        },
-        '[' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.LeftBracket };
-            _ = iter.next();
-        },
-        ']' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.RightBracket };
-            _ = iter.next();
-        },
-        '!' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Not };
-            _ = iter.next();
-        },
-        ',' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Comma };
-            _ = iter.next();
-        },
-        '#' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Hash };
-            _ = iter.next();
-        },
-        '?' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Question };
-            _ = iter.next();
-        },
-        ':' => {
-            res = .{ .str = getOneCharString(input, iter), .kind = WordType.Colon };
-            _ = iter.next();
-        },
-        '"' => {
-            res = .{ .str = try getStringLiteral('"', input, iter), .kind = WordType.StringLiteral };
-        },
-        '\'' => {
-            res = .{ .str = try getStringLiteral('\'', input, iter), .kind = WordType.StringLiteral };
-        },
-        '0'...'9' => {
-            // 数字のトークンを作成
-            res = .{ .str = try getNumberToken(input, iter), .kind = WordType.Number };
-        },
-        else => {
-            // その他の文字はキーワードまたは識別子とみなす
-            res = getWordString(input, iter);
-        },
-    }
-    return res;
+    return split_char;
+}
+
+/// 1文字のトークンを解析して、Word構造体に変換します。
+/// 文字の種類に応じて、適切なWordTypeを設定します。
+/// 文字が演算子や記号の場合は、対応するWordTypeを設定します。
+/// 文字が数字の場合は、数字のトークンを作成します。
+/// 文字が文字列リテラルの場合は、文字列リテラルのトークンを作成します。
+fn switchOneCharToWord(split_char: *const [256]bool, input: *const String, iter: *String.Iterator, c: Char) !Word {
+    return switch (c.source[0]) {
+        '\\' => .{ .str = getOneCharString(input, iter), .kind = WordType.Backslash },
+        '.' => .{ .str = getOneCharString(input, iter), .kind = WordType.Period },
+        '=' => .{ .str = getOneCharString(input, iter), .kind = WordType.Equal },
+        '<' => getLessWord(input, iter),
+        '>' => getGreaterWord(input, iter),
+        '+' => .{ .str = getOneCharString(input, iter), .kind = WordType.Plus },
+        '-' => .{ .str = getOneCharString(input, iter), .kind = WordType.Minus },
+        '*' => .{ .str = getOneCharString(input, iter), .kind = WordType.Multiply },
+        '/' => .{ .str = getOneCharString(input, iter), .kind = WordType.Devision },
+        '(' => .{ .str = getOneCharString(input, iter), .kind = WordType.LeftParen },
+        ')' => .{ .str = getOneCharString(input, iter), .kind = WordType.RightParen },
+        '[' => .{ .str = getOneCharString(input, iter), .kind = WordType.LeftBracket },
+        ']' => .{ .str = getOneCharString(input, iter), .kind = WordType.RightBracket },
+        '!' => .{ .str = getOneCharString(input, iter), .kind = WordType.Not },
+        ',' => .{ .str = getOneCharString(input, iter), .kind = WordType.Comma },
+        '#' => .{ .str = getOneCharString(input, iter), .kind = WordType.Hash },
+        '?' => .{ .str = getOneCharString(input, iter), .kind = WordType.Question },
+        ':' => .{ .str = getOneCharString(input, iter), .kind = WordType.Colon },
+        '"' => .{ .str = try getStringLiteral('"', input, iter), .kind = WordType.StringLiteral },
+        '\'' => .{ .str = try getStringLiteral('\'', input, iter), .kind = WordType.StringLiteral },
+        '0'...'9' =>
+        // 数字のトークンを作成
+        .{ .str = try getNumberToken(input, iter), .kind = WordType.Number },
+        else =>
+        // その他の文字はキーワードまたは識別子とみなす
+        getWordString(split_char, input, iter),
+    };
 }
 
 /// 1文字の文字列を取得します。
 /// 文字列のイテレータから1文字のスライスを作成します。
 fn getOneCharString(input: *const String, iter: *String.Iterator) String {
-    return String.newSlice(input.raw(), iter.index, 1);
+    const res = String.newSlice(input.raw(), iter.current_index, 1);
+    _ = iter.next(); // イテレータを1つ進める
+    return res;
 }
 
-fn getWordString(input: *const String, iter: *String.Iterator) Word {
-    const start = iter.index;
+/// 小なり演算子を取得します。
+fn getLessWord(input: *const String, iter: *String.Iterator) Word {
+    if (iter.skip(1)) |lc| {
+        if (lc.len == 1) {
+            switch (lc.source[0]) {
+                '=' => {
+                    // <= 演算子
+                    const res = Word{ .str = String.newSlice(input.raw(), iter.current_index, 2), .kind = WordType.LessEqual };
+                    _ = iter.next();
+                    _ = iter.next();
+                    return res;
+                },
+                '>' => {
+                    // <> 演算子
+                    const res = Word{ .str = String.newSlice(input.raw(), iter.current_index, 2), .kind = WordType.NotEqual };
+                    _ = iter.next();
+                    _ = iter.next();
+                    return res;
+                },
+                else => {},
+            }
+        }
+    }
+    // 単なる < 演算子
+    return .{ .str = getOneCharString(input, iter), .kind = WordType.LessThan };
+}
+
+/// 大なり演算子を取得します。
+fn getGreaterWord(input: *const String, iter: *String.Iterator) Word {
+    if (iter.skip(1)) |lc| {
+        if (lc.len == 1) {
+            if (lc.source[0] == '=') {
+                // >= 演算子
+                const res = Word{ .str = String.newSlice(input.raw(), iter.current_index, 2), .kind = WordType.GreaterEqual };
+                _ = iter.next();
+                _ = iter.next();
+                return res;
+            }
+        }
+    }
+    // 単なる < 演算子
+    return .{ .str = getOneCharString(input, iter), .kind = WordType.GreaterThan };
+}
+
+/// 文字列から単語を取得します。
+/// イテレータを使用して、空白文字または分割文字が見つかるまで文字を読み取り、
+/// その文字列をWord構造体に変換します。
+/// 分割文字は、空白文字や特定の記号（例: +, -, *, /, = など）です。
+fn getWordString(split_char: *const [256]bool, input: *const String, iter: *String.Iterator) Word {
+    const start = iter.current_index;
     while (iter.hasNext()) {
-        const pc = iter.next();
+        const pc = iter.peek();
         if (pc) |c| {
             if (c.isWhiteSpace() or c.len > 1 or split_char[c.source[0]]) {
                 // 空白文字または分割文字が見つかったら終了
                 break;
             }
+            _ = iter.next();
         } else {
             // イテレータの終端に到達した場合も終了
             break;
         }
     }
+
+    const keyword = String.newSlice(input.raw(), start, iter.current_index - start);
+    if (isKeyword(&keyword, "true")) { // 真
+        return .{ .str = keyword, .kind = WordType.TrueLiteral };
+    } else if (isKeyword(&keyword, "false")) { // 偽
+        return .{ .str = keyword, .kind = WordType.FalseLiteral };
+    } else if (isKeyword(&keyword, "and")) { // 論理積演算子
+        return .{ .str = keyword, .kind = WordType.AndOperator };
+    } else if (isKeyword(&keyword, "or")) { // 論理和演算子
+        return .{ .str = keyword, .kind = WordType.OrOperator };
+    } else if (isKeyword(&keyword, "xor")) { // 排他的論理和
+        return .{ .str = keyword, .kind = WordType.XorOperator };
+    } else {
+        // その他のキーワードは識別子として扱う
+        return .{ .str = keyword, .kind = WordType.Identifier };
+    }
+}
+
+/// キーワードかどうかを判定します。
+/// 文字列の最初の文字がキーワードの最初の文字と一致する場合にのみ、比較を行います。
+inline fn isKeyword(input: *const String, wordchar: []const u8) bool {
+    return input.raw()[0] == wordchar[0] and input.eqlLiteral(wordchar);
+}
+
+/// キーワードを取得します。
+/// キーワードは、識別子の一種であり、特定の意味を持つ単語です。
+inline fn getKeyword(input: *const String, wordType: WordType) Word {
     return .{
-        .str = String.newSlice(input.raw(), start, iter.index - start),
-        .kind = WordType.Identifier,
+        .str = input.*,
+        .kind = wordType,
     };
 }
 
 /// 文字列リテラルを取得します。
 /// 文字列リテラルは、引用符　' または " で囲まれた文字列です。
 fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *String.Iterator) !String {
-    const start = iter.index;
+    const start = iter.current_index;
     _ = iter.next();
     var closed = false;
 
@@ -300,7 +287,7 @@ fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *S
         // 文字列リテラルが閉じられていない場合はエラー
         return LexicalError.UnclosedStringLiteralError;
     }
-    return String.newSlice(input.raw(), start, iter.index - start);
+    return String.newSlice(input.raw(), start, iter.current_index - start);
 }
 
 /// 数字のトークンを取得します。
@@ -308,7 +295,7 @@ fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *S
 /// 符号（+/-）も許可されます。
 /// 例: "123", "-456.78", "+3.14" など。
 fn getNumberToken(input: *const String, iter: *String.Iterator) !String {
-    const start = iter.index;
+    const start = iter.current_index;
     var dec = false;
     var num = false;
 
@@ -349,7 +336,7 @@ fn getNumberToken(input: *const String, iter: *String.Iterator) !String {
             }
         }
     }
-    return String.newSlice(input.raw(), start, iter.index - start);
+    return String.newSlice(input.raw(), start, iter.current_index - start);
 }
 
 test "getStringLiteral test" {

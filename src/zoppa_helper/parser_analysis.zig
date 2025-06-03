@@ -133,7 +133,19 @@ pub fn Parser() type {
         }
 
         fn logicalParser(self: *Self, iter: *Iterator) !*Expression {
-            return try self.comparisonParser(iter);
+            var left = try self.comparisonParser(iter);
+            while (iter.peek()) |word| {
+                if (word.kind == .AndOperator or word.kind == .OrOperator) {
+                    _ = iter.next();
+                    const right = try self.comparisonParser(iter);
+                    const expr = self.expr_store.get({}) catch return ParserError.OutOfMemoryExpression;
+                    expr.* = .{ .parser = self, .data = .{ .BinaryExpress = .{ .kind = word.kind, .left = left, .right = right } } };
+                    left = expr;
+                } else {
+                    break;
+                }
+            }
+            return left;
         }
 
         fn comparisonParser(self: *Self, iter: *Iterator) AllErrors!*Expression {
@@ -196,7 +208,7 @@ pub fn Parser() type {
                     .StringLiteral => {
                         _ = iter.next();
                         const expr = self.expr_store.get({}) catch return ParserError.OutOfMemoryExpression;
-                        expr.* = .{ .parser = self, .data = .{ .StringLiteral = try self.parseStringLiteral(word.str.raw()) } };
+                        expr.* = .{ .parser = self, .data = .{ .StringExpress = try self.parseStringLiteral(word.str.raw()) } };
                         return expr;
                     },
                     .Plus, .Minus, .Not => {
@@ -204,6 +216,18 @@ pub fn Parser() type {
                         const nextExpr = try self.parseFactor(iter);
                         const expr = self.expr_store.get({}) catch return ParserError.OutOfMemoryExpression;
                         expr.* = .{ .parser = self, .data = .{ .UnaryExpress = .{ .kind = word.kind, .expr = nextExpr } } };
+                        return expr;
+                    },
+                    .TrueLiteral => {
+                        _ = iter.next();
+                        const expr = self.expr_store.get({}) catch return ParserError.OutOfMemoryExpression;
+                        expr.* = .{ .parser = self, .data = .{ .BooleanExpress = true } };
+                        return expr;
+                    },
+                    .FalseLiteral => {
+                        _ = iter.next();
+                        const expr = self.expr_store.get({}) catch return ParserError.OutOfMemoryExpression;
+                        expr.* = .{ .parser = self, .data = .{ .BooleanExpress = false } };
                         return expr;
                     },
                     else => {},
@@ -320,7 +344,8 @@ pub fn Parser() type {
                 BinaryExpress: struct { kind: WordType, left: *Expression, right: *Expression },
                 UnaryExpress: struct { kind: WordType, expr: *Expression },
                 NumberExpress: f64,
-                StringLiteral: *String,
+                StringExpress: *String,
+                BooleanExpress: bool,
             },
 
             pub fn get(self: *const Expression) Value {
@@ -346,6 +371,27 @@ pub fn Parser() type {
                             .Minus => .{ .Number = leftValue.Number - rightValue.Number },
                             .Multiply => .{ .Number = leftValue.Number * rightValue.Number },
                             .Devision => if (rightValue.Number != 0) .{ .Number = leftValue.Number / rightValue.Number } else .{ .Error = error.InvalidExpression },
+                            .AndOperator => switch (leftValue) {
+                                .Boolean => switch (rightValue) {
+                                    .Boolean => .{ .Boolean = leftValue.Boolean and rightValue.Boolean },
+                                    else => .{ .Error = error.InvalidExpression },
+                                },
+                                else => .{ .Error = error.InvalidExpression },
+                            },
+                            .OrOperator => switch (leftValue) {
+                                .Boolean => switch (rightValue) {
+                                    .Boolean => .{ .Boolean = leftValue.Boolean or rightValue.Boolean },
+                                    else => .{ .Error = error.InvalidExpression },
+                                },
+                                else => .{ .Error = error.InvalidExpression },
+                            },
+                            .XorOperator => switch (leftValue) {
+                                .Boolean => switch (rightValue) {
+                                    .Boolean => .{ .Error = error.InvalidExpression },
+                                    else => .{ .Error = error.InvalidExpression },
+                                },
+                                else => .{ .Error = error.InvalidExpression },
+                            },
                             else => .{ .Error = error.InvalidExpression },
                         };
                     },
@@ -358,7 +404,8 @@ pub fn Parser() type {
                         };
                     },
                     .NumberExpress => .{ .Number = self.data.NumberExpress },
-                    .StringLiteral => |str| .{ .String = str },
+                    .StringExpress => |str| .{ .String = str },
+                    .BooleanExpress => |bol| .{ .Boolean = bol },
                 };
             }
 
@@ -374,6 +421,7 @@ pub fn Parser() type {
             Error: AllErrors,
             Number: f64,
             String: *String,
+            Boolean: bool,
             pub fn deinit(self: *Value) void {
                 switch (self.*) {
                     .String => |s| s.deinit(),
@@ -400,6 +448,24 @@ test "string literal test" {
     const inp2 = String.newAllSlice("'あい\\'うえお'");
     const expr2 = try parser.executes(&inp2);
     try testing.expectEqualStrings("あい'うえお", expr2.get().String.raw());
+}
+
+test "logcal test" {
+    const allocator = std.testing.allocator;
+    var parser = try Parser().init(allocator);
+    defer parser.deinit();
+
+    const inp1 = String.newAllSlice("true and false");
+    const expr1 = try parser.executes(&inp1);
+    try testing.expect(expr1.get().Boolean == false);
+
+    const inp2 = String.newAllSlice("true xor false");
+    const expr2 = try parser.executes(&inp2);
+    try testing.expect(expr2.get().Boolean == true);
+
+    //const inp3 = String.newAllSlice("false or true");
+    //const expr3 = try parser.executes(&inp3);
+    //try testing.expect(expr3.get().Boolean == true);
 }
 
 test "parseParen test" {
@@ -456,4 +522,12 @@ test "factor test" {
     const inp4 = String.newAllSlice("1_23.45");
     const expr4 = try parser.executes(&inp4);
     try testing.expectEqual(123.45, expr4.get().Number);
+
+    const inp5 = String.newAllSlice("true");
+    const expr5 = try parser.executes(&inp5);
+    try testing.expect(expr5.get().Boolean == true);
+
+    const inp6 = String.newAllSlice("false");
+    const expr6 = try parser.executes(&inp6);
+    try testing.expect(expr6.get().Boolean == false);
 }

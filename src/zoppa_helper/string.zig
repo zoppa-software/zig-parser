@@ -335,26 +335,26 @@ pub const String = union(enum) {
     pub fn iterate(self: *const String) Iterator {
         return Iterator{
             .str = self.raw(),
-            .index = 0,
+            .current_index = 0,
         };
     }
 
     /// 文字列のイテレータ。
     pub const Iterator = struct {
         str: []const u8,
-        index: usize,
+        current_index: usize,
 
         /// 次の要素が存在するかどうかを確認します。
         pub fn hasNext(self: *Iterator) bool {
-            return self.index < self.str.len;
+            return self.current_index < self.str.len;
         }
 
         /// 次の要素を取得します。
         pub fn next(self: *Iterator) ?Char {
-            if (self.index < self.str.len) {
-                const ln = std.unicode.utf8ByteSequenceLength(self.str[self.index]) catch 1;
-                const char = Char.init(self.str[self.index .. self.index + ln]);
-                self.index += ln;
+            if (self.current_index < self.str.len) {
+                const ln = std.unicode.utf8ByteSequenceLength(self.str[self.current_index]) catch 1;
+                const char = Char.init(self.str[self.current_index .. self.current_index + ln]);
+                self.current_index += ln;
                 return char;
             } else {
                 return null;
@@ -363,9 +363,9 @@ pub const String = union(enum) {
 
         /// 次の要素を取得します。参照位置を変更しません。
         pub fn peek(self: *const Iterator) ?Char {
-            if (self.index < self.str.len) {
-                const ln = std.unicode.utf8ByteSequenceLength(self.str[self.index]) catch 1;
-                return Char.init(self.str[self.index .. self.index + ln]);
+            if (self.current_index < self.str.len) {
+                const ln = std.unicode.utf8ByteSequenceLength(self.str[self.current_index]) catch 1;
+                return Char.init(self.str[self.current_index .. self.current_index + ln]);
             } else {
                 return null;
             }
@@ -373,7 +373,7 @@ pub const String = union(enum) {
 
         /// 次の要素を取得します。参照位置を変更しません。
         pub fn skip(self: *const Iterator, count: usize) ?Char {
-            var idx = self.index;
+            var idx = self.current_index;
             var i: usize = 0;
             var ln: usize = 1;
             while (i < count and idx < self.str.len) {

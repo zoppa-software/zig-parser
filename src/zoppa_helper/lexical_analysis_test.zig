@@ -45,12 +45,14 @@ test "splitWords empty input" {
 test "splitWords keyword input" {
     const allocator = std.testing.allocator;
 
-    const inp1 = String.newAllSlice("true");
+    const inp1 = String.newAllSlice("true-false");
     defer inp1.deinit();
     const tokens1 = try splitWords(&inp1, allocator);
     defer allocator.free(tokens1);
 
-    try testing.expect(tokens1.len == 1);
-    try testing.expect(tokens1[0].kind == WordType.Identifier);
+    try testing.expect(tokens1.len == 3);
+    try testing.expect(tokens1[0].kind == WordType.TrueLiteral);
     try testing.expectEqualSlices(u8, "true", tokens1[0].str.raw());
+    try testing.expect(tokens1[2].kind == WordType.FalseLiteral);
+    try testing.expectEqualSlices(u8, "false", tokens1[2].str.raw());
 }
