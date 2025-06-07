@@ -66,7 +66,7 @@ pub const String = union(enum) {
         }
     }
 
-    /// 新しい文字列をスライスされた形式で作成します。
+    /// 新しい文字列を文字単位でスライスされた形式で作成します。
     /// `source` はUTF-8エンコードされた文字列でなければなりません。
     /// `first` はスライスの開始位置で、`length` はスライスの長さです。
     pub fn newSlice(source: []const u8, first: usize, length: usize) String {
@@ -80,13 +80,27 @@ pub const String = union(enum) {
         };
     }
 
+    /// 新しい文字列を文字単位でスライスされた形式で作成します。
+    /// `source` はUTF-8エンコードされた文字列でなければなりません。
+    /// `first` はスライスの開始位置で、`length` はスライスの長さです。
+    pub fn fromBytes(source: []const u8, first: usize, length: usize) String {
+        const byteSlice = source[first .. first + length];
+        return String{
+            .slice = .{
+                .start = first,
+                .size = countLen(byteSlice),
+                .value = byteSlice,
+            },
+        };
+    }
+
     /// 新しい文字列をスライスされた形式で作成します。
     /// `source` はUTF-8エンコードされた文字列でなければなりません。
     pub fn newAllSlice(source: []const u8) String {
         return String{
             .slice = .{
-                .size = countLen(source),
                 .start = 0,
+                .size = countLen(source),
                 .value = source,
             },
         };
@@ -317,6 +331,14 @@ pub const String = union(enum) {
         if (self_slice.len != other.len) return false;
 
         return std.mem.eql(u8, self_slice, other);
+    }
+
+    /// 文字列が他のUTF-8エンコードされた文字列と等しいかどうかを確認します。
+    pub fn startWithLiteral(self: *const String, other: []const u8) bool {
+        // 文字列のバイト配列を比較します。
+        const self_slice = self.raw();
+
+        return std.mem.startsWith(u8, self_slice, other);
     }
 
     /// 文字列の特定のインデックスにある文字の値を取得します。

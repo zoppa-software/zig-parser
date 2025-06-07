@@ -4,7 +4,9 @@ const Allocator = std.mem.Allocator;
 const String = @import("string.zig").String;
 const Word = @import("lexical_analysis.zig").Word;
 const WordType = @import("lexical_analysis.zig").WordType;
+const BlockType = @import("lexical_analysis.zig").BlockType;
 const splitWords = @import("lexical_analysis.zig").splitWords;
+const splitBlocks = @import("lexical_analysis.zig").splitBlocks;
 
 test "splitWords test" {
     const allocator = std.testing.allocator;
@@ -55,4 +57,37 @@ test "splitWords keyword input" {
     try testing.expectEqualSlices(u8, "true", tokens1[0].str.raw());
     try testing.expect(tokens1[2].kind == WordType.FalseLiteral);
     try testing.expectEqualSlices(u8, "false", tokens1[2].str.raw());
+}
+
+test "splitBlocks test" {
+    const allocator = std.testing.allocator;
+    const input = String.newAllSlice("abcd#{123}efg");
+    defer input.deinit();
+
+    const ans1 = try splitBlocks(&input, allocator);
+    defer allocator.free(ans1);
+    try std.testing.expectEqual(3, ans1.len);
+    try std.testing.expectEqualSlices(u8, "abcd", ans1[0].str.raw());
+    try std.testing.expect(ans1[0].kind == BlockType.Text);
+    try std.testing.expectEqualSlices(u8, "#{123}", ans1[1].str.raw());
+    try std.testing.expect(ans1[1].kind == BlockType.Unfold);
+    try std.testing.expectEqualSlices(u8, "efg", ans1[2].str.raw());
+    try std.testing.expect(ans1[2].kind == BlockType.Text);
+
+    const input2 = String.newAllSlice("{if 1 + 2 > 0}あいうえお{else}かきくけこ{/if}");
+    defer input2.deinit();
+
+    const ans2 = try splitBlocks(&input2, allocator);
+    defer allocator.free(ans2);
+    try std.testing.expectEqual(5, ans2.len);
+    try std.testing.expectEqualSlices(u8, "{if 1 + 2 > 0}", ans2[0].str.raw());
+    try std.testing.expect(ans2[0].kind == BlockType.IfBlock);
+    try std.testing.expectEqualSlices(u8, "あいうえお", ans2[1].str.raw());
+    try std.testing.expect(ans2[1].kind == BlockType.Text);
+    try std.testing.expectEqualSlices(u8, "{else}", ans2[2].str.raw());
+    try std.testing.expect(ans2[2].kind == BlockType.ElseBlock);
+    try std.testing.expectEqualSlices(u8, "かきくけこ", ans2[3].str.raw());
+    try std.testing.expect(ans2[3].kind == BlockType.Text);
+    try std.testing.expectEqualSlices(u8, "{/if}", ans2[4].str.raw());
+    try std.testing.expect(ans2[4].kind == BlockType.EndIfBlock);
 }

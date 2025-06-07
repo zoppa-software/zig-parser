@@ -9,10 +9,16 @@ const ArrayList = std.ArrayList;
 pub const LexicalError = error{
     /// 単語解析エラー
     WordAnalysisError,
+    /// ブロック解析エラー
+    BlockAnalysisError,
     /// アンダーバーの連続エラー
     ConsecutiveUnderscoreError,
     /// 文字列リテラルが閉じられていない場合はエラー
     UnclosedStringLiteralError,
+    /// ブロックが閉じられていない場合はエラー
+    UnclosedBlockError,
+    /// 無効なコマンドの場合はエラー
+    InvalidCommandError,
 };
 
 /// 単語の種類を表す列挙型。
@@ -21,6 +27,7 @@ pub const WordType = enum {
     Identifier, // 識別子
     Number, // 数字
     Period, // ピリオド
+    Assign, // 代入
     Equal, // イコール
     LessThan, // 小なり
     GreaterThan, // 大なり
@@ -125,7 +132,7 @@ fn switchOneCharToWord(split_char: *const [256]bool, input: *const String, iter:
     return switch (c.source[0]) {
         '\\' => .{ .str = getOneCharString(input, iter), .kind = WordType.Backslash },
         '.' => .{ .str = getOneCharString(input, iter), .kind = WordType.Period },
-        '=' => .{ .str = getOneCharString(input, iter), .kind = WordType.Equal },
+        '=' => getEqualWord(input, iter),
         '<' => getLessWord(input, iter),
         '>' => getGreaterWord(input, iter),
         '+' => .{ .str = getOneCharString(input, iter), .kind = WordType.Plus },
@@ -155,9 +162,26 @@ fn switchOneCharToWord(split_char: *const [256]bool, input: *const String, iter:
 /// 1文字の文字列を取得します。
 /// 文字列のイテレータから1文字のスライスを作成します。
 fn getOneCharString(input: *const String, iter: *String.Iterator) String {
-    const res = String.newSlice(input.raw(), iter.current_index, 1);
+    const res = String.fromBytes(input.raw(), iter.current_index, 1);
     _ = iter.next(); // イテレータを1つ進める
     return res;
+}
+
+/// 等価演算子を取得します。
+fn getEqualWord(input: *const String, iter: *String.Iterator) Word {
+    if (iter.skip(1)) |lc| {
+        if (lc.len == 1) {
+            if (lc.source[0] == '=') {
+                // == 演算子
+                const res = Word{ .str = String.fromBytes(input.raw(), iter.current_index, 2), .kind = WordType.Equal };
+                _ = iter.next();
+                _ = iter.next();
+                return res;
+            }
+        }
+    }
+    // 単なる = 演算子
+    return .{ .str = getOneCharString(input, iter), .kind = WordType.Assign };
 }
 
 /// 小なり演算子を取得します。
@@ -167,14 +191,14 @@ fn getLessWord(input: *const String, iter: *String.Iterator) Word {
             switch (lc.source[0]) {
                 '=' => {
                     // <= 演算子
-                    const res = Word{ .str = String.newSlice(input.raw(), iter.current_index, 2), .kind = WordType.LessEqual };
+                    const res = Word{ .str = String.fromBytes(input.raw(), iter.current_index, 2), .kind = WordType.LessEqual };
                     _ = iter.next();
                     _ = iter.next();
                     return res;
                 },
                 '>' => {
                     // <> 演算子
-                    const res = Word{ .str = String.newSlice(input.raw(), iter.current_index, 2), .kind = WordType.NotEqual };
+                    const res = Word{ .str = String.fromBytes(input.raw(), iter.current_index, 2), .kind = WordType.NotEqual };
                     _ = iter.next();
                     _ = iter.next();
                     return res;
@@ -193,7 +217,7 @@ fn getGreaterWord(input: *const String, iter: *String.Iterator) Word {
         if (lc.len == 1) {
             if (lc.source[0] == '=') {
                 // >= 演算子
-                const res = Word{ .str = String.newSlice(input.raw(), iter.current_index, 2), .kind = WordType.GreaterEqual };
+                const res = Word{ .str = String.fromBytes(input.raw(), iter.current_index, 2), .kind = WordType.GreaterEqual };
                 _ = iter.next();
                 _ = iter.next();
                 return res;
@@ -224,7 +248,7 @@ fn getWordString(split_char: *const [256]bool, input: *const String, iter: *Stri
         }
     }
 
-    const keyword = String.newSlice(input.raw(), start, iter.current_index - start);
+    const keyword = String.fromBytes(input.raw(), start, iter.current_index - start);
     if (isKeyword(&keyword, "true")) { // 真
         return .{ .str = keyword, .kind = WordType.TrueLiteral };
     } else if (isKeyword(&keyword, "false")) { // 偽
@@ -267,17 +291,17 @@ fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *S
         const pc = iter.next();
         if (pc) |c| {
             if (c.len == 1 and c.source[0] == '\\' and
-                iter.peek() != null and iter.peek().?.len == 1 and iter.peek().?.source[0] == quote)
+                iter.peek() != null and iter.peek().?.len == 1 and
+                (iter.peek().?.source[0] == quote or iter.peek().?.source[0] == 't' or iter.peek().?.source[0] == 'n'))
             {
                 _ = iter.next();
             } else if (c.len == 1 and c.source[0] == quote and
-                iter.hasNext() and iter.peek().?.len == 1 and (iter.peek().?.source[0] == quote or iter.peek().?.source[0] == 't' or iter.peek().?.source[0] == 'n'))
+                iter.hasNext() and iter.peek().?.len == 1 and iter.peek().?.source[0] == quote)
             {
                 _ = iter.next();
             } else if (c.len == 1 and c.source[0] == quote) {
                 // 文字列リテラルが閉じられた
                 closed = true;
-                _ = iter.next();
                 break;
             }
         }
@@ -287,7 +311,7 @@ fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *S
         // 文字列リテラルが閉じられていない場合はエラー
         return LexicalError.UnclosedStringLiteralError;
     }
-    return String.newSlice(input.raw(), start, iter.current_index - start);
+    return String.fromBytes(input.raw(), start, iter.current_index - start);
 }
 
 /// 数字のトークンを取得します。
@@ -336,7 +360,165 @@ fn getNumberToken(input: *const String, iter: *String.Iterator) !String {
             }
         }
     }
-    return String.newSlice(input.raw(), start, iter.current_index - start);
+    return String.fromBytes(input.raw(), start, iter.current_index - start);
+}
+
+/// ブロックの種類を表す列挙型。
+/// ブロックは、識別子やキーワードなどの特定の種類の文字列を表します。
+pub const BlockType = enum {
+    Text, // テキスト部
+    Unfold, // 展開部
+    NoEscapeUnfold, // エスケープなし展開部
+    IfBlock, // ifブロック
+    ElseIfBlock, // else ifブロック
+    ElseBlock, // elseブロック
+    EndIfBlock, // endifブロック
+};
+
+/// ブロックを表す構造体。
+/// ブロックは、文字列とその種類を持ちます。
+pub const Block = struct {
+    str: String,
+    kind: BlockType,
+};
+
+/// 文字列をブロックに分割します。
+/// 入力文字列を解析して、ブロックのリストを生成します。
+pub fn splitBlocks(input: *const String, allocator: Allocator) ![]Block {
+    var tokens = ArrayList(Block).init(allocator);
+    defer tokens.deinit();
+
+    var iter = input.iterate();
+    while (iter.hasNext()) {
+        const pc = iter.peek();
+        if (pc) |c| {
+            const word = switch (c.source[0]) {
+                '{' => try getCommandBlock(input, &iter),
+                '#' => try getUnfoldBlock(input, &iter, BlockType.Unfold),
+                '!' => try getUnfoldBlock(input, &iter, BlockType.NoEscapeUnfold),
+                else => Block{ .str = getTextBlock(input, &iter), .kind = BlockType.Text },
+            };
+            try tokens.append(word);
+        }
+    }
+    return tokens.toOwnedSlice();
+}
+
+/// コマンドブロックを取得します。
+/// コマンドブロックは、{ で始まり、} で終わる文字列です。
+fn getCommandBlock(input: *const String, iter: *String.Iterator) !Block {
+    const cmd = try getCommandBlockString(input, iter, false);
+    if (cmd.startWithLiteral("{if") and cmd.at(3).?.isWhiteSpace()) {
+        return .{ .str = cmd, .kind = BlockType.IfBlock };
+    } else if (cmd.startWithLiteral("{else if") and cmd.at(8).?.isWhiteSpace()) {
+        return .{ .str = cmd, .kind = BlockType.ElseIfBlock };
+    } else if (cmd.startWithLiteral("{elseif") and cmd.at(7).?.isWhiteSpace()) {
+        return .{ .str = cmd, .kind = BlockType.ElseIfBlock };
+    } else if (cmd.eqlLiteral("{else}")) {
+        return .{ .str = cmd, .kind = BlockType.ElseBlock };
+    } else if (cmd.eqlLiteral("{/if}")) {
+        return .{ .str = cmd, .kind = BlockType.EndIfBlock };
+    } else {
+        return error.InvalidCommandError;
+    }
+}
+
+fn getUnfoldBlock(input: *const String, iter: *String.Iterator, blkType: BlockType) !Block {
+    if (iter.skip(1)) |lc| {
+        if (lc.len == 1) {
+            if (lc.source[0] != '{') {
+                return .{ .str = getTextBlock(input, iter), .kind = BlockType.Text };
+            }
+        }
+        return .{ .str = try getCommandBlockString(input, iter, true), .kind = blkType };
+    } else {
+        return .{ .str = getTextBlock(input, iter), .kind = BlockType.Text };
+    }
+}
+
+/// コマンドブロック内の文字列を取得します。
+/// コマンドブロックは、{ で始まり、} で終わる文字列です。
+fn getCommandBlockString(input: *const String, iter: *String.Iterator, isSkip: bool) !String {
+    const start = iter.current_index;
+    if (isSkip) {
+        _ = iter.next();
+    }
+    _ = iter.next();
+    var closed = false;
+
+    // ブロックの終わりを探す
+    while (iter.hasNext()) {
+        const c = iter.next().?;
+        if (c.len == 1) {
+            switch (c.source[0]) {
+                '}' => {
+                    // } が見つかった場合、ループを終了
+                    closed = true;
+                    break;
+                },
+
+                // エスケープ文字が見つかった場合は次の文字を無視
+                '\\' => {
+                    const nc = iter.peek();
+                    if (nc) |next_c| {
+                        if (next_c.len == 1 and (next_c.source[0] == '{' or next_c.source[0] == '}')) {
+                            // エスケープされた { または } を無視
+                            _ = iter.next();
+                        }
+                    }
+                },
+                else => {},
+            }
+        }
+    }
+
+    if (!closed) {
+        // ブロックが閉じられていない場合はエラー
+        return LexicalError.UnclosedBlockError;
+    }
+    return String.fromBytes(input.raw(), start, iter.current_index - start);
+}
+
+/// テキストブロック内のテキストを取得します。
+/// テキストブロックは、{ や #, ! などのコマンドが見つかるまでの文字列です。
+fn getTextBlock(input: *const String, iter: *String.Iterator) String {
+    const start = iter.current_index;
+
+    while (iter.hasNext()) {
+        const c = iter.peek().?;
+        if (c.len == 1) {
+            switch (c.source[0]) {
+                // { が見つかったらテキスト部の終了
+                '{' => {
+                    break;
+                },
+
+                // # または ! が見つかったらテキスト部の終了
+                '#', '!' => {
+                    const nc = iter.skip(1);
+                    if (nc) |next_c| {
+                        if (next_c.len == 1 and next_c.source[0] == '{') {
+                            break;
+                        }
+                    }
+                },
+
+                // エスケープ文字が見つかった場合は次の文字を無視
+                '\\' => {
+                    const nc = iter.skip(1);
+                    if (nc) |next_c| {
+                        if (next_c.len == 1 and (next_c.source[0] == '{' or next_c.source[0] == '}' or next_c.source[0] == '#' or next_c.source[0] == '!')) {
+                            // エスケープされた { または } を無視
+                            _ = iter.next();
+                        }
+                    }
+                },
+                else => {},
+            }
+        }
+        _ = iter.next();
+    }
+    return String.fromBytes(input.raw(), start, iter.current_index - start);
 }
 
 test "getStringLiteral test" {
