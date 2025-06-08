@@ -7,7 +7,7 @@ const String = @import("string.zig").String;
 
 test "logcal test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("true and false");
@@ -73,7 +73,7 @@ test "logcal test" {
 
 test "unary test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("+123.45");
@@ -101,7 +101,7 @@ test "unary test" {
 
 test "string literal test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp4 = String.newAllSlice("\"あいうえお\" + \"かきくけこ\"");
@@ -137,7 +137,7 @@ test "string literal test" {
 
 test "parseParen test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp5 = String.newAllSlice("((\"Hello\" + \" \") + \"World\")");
@@ -168,7 +168,7 @@ test "parseParen test" {
 
 test "additionOrSubtraction test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("10 / 2 + 2 - 7");
@@ -189,7 +189,7 @@ test "additionOrSubtraction test" {
 
 test "multiplyOrDevision test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("12.5 * 2.0 / 5.0");
@@ -215,7 +215,7 @@ test "multiplyOrDevision test" {
 
 test "factor test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("12345.6");
@@ -251,7 +251,7 @@ test "factor test" {
 
 test "equal, not equal test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("10 == 10");
@@ -317,7 +317,7 @@ test "equal, not equal test" {
 
 test "greater test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("10 > 5");
@@ -374,7 +374,7 @@ test "greater test" {
 
 test "greater or equal test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("10 >= 5");
@@ -431,7 +431,7 @@ test "greater or equal test" {
 
 test "less test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("5 < 10");
@@ -488,7 +488,7 @@ test "less test" {
 
 test "less or equal test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("5 <= 10");
@@ -545,7 +545,7 @@ test "less or equal test" {
 
 test "ternaryOperatorParser test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("true ? 1 : 0");
@@ -581,7 +581,7 @@ test "ternaryOperatorParser test" {
 
 test "translate test" {
     const allocator = std.testing.allocator;
-    var parser = try Parser().init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const inp1 = String.newAllSlice("Hello, #{'World \\{\\}'}!");
@@ -593,4 +593,20 @@ test "translate test" {
     const expr2 = try parser.translate(&inp2);
     const ans2 = try expr2.get();
     try testing.expectEqualStrings("1.1 + 1 = 2.1", ans2.String.raw());
+}
+
+test "if block test" {
+    const allocator = std.testing.allocator;
+    var parser = try Parser.init(allocator);
+    defer parser.deinit();
+
+    const inp1 = String.newAllSlice("始めました{if 1 + 2 > 0}あいうえお{else}かきくけこ{/if}終わりました");
+    const expr1 = try parser.translate(&inp1);
+    const ans1 = try expr1.get();
+    try testing.expectEqualStrings("始めましたあいうえお終わりました", ans1.String.raw());
+
+    const inp2 = String.newAllSlice("どれが一致する? {if false}A{elseif true}{if   false   }B_1{else}B_2{/if}{else}C{/if}");
+    const expr2 = try parser.translate(&inp2);
+    const ans2 = try expr2.get();
+    try testing.expectEqualStrings("どれが一致する? B_2", ans2.String.raw());
 }

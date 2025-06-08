@@ -80,7 +80,7 @@ test "splitBlocks test" {
     const ans2 = try splitBlocks(&input2, allocator);
     defer allocator.free(ans2);
     try std.testing.expectEqual(5, ans2.len);
-    try std.testing.expectEqualSlices(u8, "{if 1 + 2 > 0}", ans2[0].str.raw());
+    try std.testing.expectEqualSlices(u8, "1 + 2 > 0", ans2[0].str.raw());
     try std.testing.expect(ans2[0].kind == BlockType.IfBlock);
     try std.testing.expectEqualSlices(u8, "あいうえお", ans2[1].str.raw());
     try std.testing.expect(ans2[1].kind == BlockType.Text);

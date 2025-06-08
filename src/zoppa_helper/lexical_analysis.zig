@@ -409,11 +409,11 @@ pub fn splitBlocks(input: *const String, allocator: Allocator) ![]Block {
 fn getCommandBlock(input: *const String, iter: *String.Iterator) !Block {
     const cmd = try getCommandBlockString(input, iter, false);
     if (cmd.startWithLiteral("{if") and cmd.at(3).?.isWhiteSpace()) {
-        return .{ .str = cmd, .kind = BlockType.IfBlock };
+        return .{ .str = cmd.mid(4, cmd.len() - 5), .kind = BlockType.IfBlock };
     } else if (cmd.startWithLiteral("{else if") and cmd.at(8).?.isWhiteSpace()) {
-        return .{ .str = cmd, .kind = BlockType.ElseIfBlock };
+        return .{ .str = cmd.mid(9, cmd.len() - 10), .kind = BlockType.ElseIfBlock };
     } else if (cmd.startWithLiteral("{elseif") and cmd.at(7).?.isWhiteSpace()) {
-        return .{ .str = cmd, .kind = BlockType.ElseIfBlock };
+        return .{ .str = cmd.mid(8, cmd.len() - 9), .kind = BlockType.ElseIfBlock };
     } else if (cmd.eqlLiteral("{else}")) {
         return .{ .str = cmd, .kind = BlockType.ElseBlock };
     } else if (cmd.eqlLiteral("{/if}")) {
@@ -423,6 +423,8 @@ fn getCommandBlock(input: *const String, iter: *String.Iterator) !Block {
     }
 }
 
+/// 展開ブロックを取得します。
+/// 展開ブロックは、# または ! で始まり、{ で終わる文字列です。
 fn getUnfoldBlock(input: *const String, iter: *String.Iterator, blkType: BlockType) !Block {
     if (iter.skip(1)) |lc| {
         if (lc.len == 1) {
