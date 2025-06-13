@@ -1,20 +1,19 @@
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const String = @import("string.zig").String;
+const String = @import("strings/string.zig").String;
 const ArrayList = std.ArrayList;
 const LexicalAnalysis = @import("lexical_analysis.zig");
 const ParserAnalysis = @import("parser_analysis.zig");
-const AnalysisIterator = @import("parser_analysis_iterator.zig");
-const Parser = @import("parser_analysis.zig").Parser;
-const Expression = @import("parser_analysis_expression.zig").AnalysisExpression;
-
-const AllErrors = LexicalAnalysis.LexicalError || ParserAnalysis.ParserError;
+const Parser = @import("parser_analysis.zig").AnalysisParser;
+const Iterator = @import("analysis_iterator.zig").AnalysisIterator;
+const Expression = @import("analysis_expression.zig").AnalysisExpression;
+const Errors = @import("analysis_error.zig").AnalysisErrors;
 
 /// 三項演算子の解析を行います。
 /// `parser` は自身のパーサーインスタンスで、`iter` は単語のイテレータです。
 /// この関数は、三項演算子（条件 ? 真の値 : 偽の値）を解析し、結果の `Expression` を返します。
-pub fn ternaryOperatorParser(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) !*Expression {
+pub fn ternaryOperatorParser(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) !*Expression {
     const condition = try logicalParser(parser, iter, buffer);
     if (iter.peek()) |word| {
         if (word.kind == .Question) {
@@ -30,7 +29,7 @@ pub fn ternaryOperatorParser(parser: *Parser, iter: *AnalysisIterator.Iterator(L
             const false_expr = try logicalParser(parser, iter, buffer);
 
             // 三項演算子の式を生成
-            const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+            const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
             expr.* = .{ .parser = parser, .data = .{ .TernaryExpress = .{ .condition = condition, .true_expr = ture_expr, .false_expr = false_expr } } };
             return expr;
         }
@@ -41,13 +40,13 @@ pub fn ternaryOperatorParser(parser: *Parser, iter: *AnalysisIterator.Iterator(L
 /// 論理式の解析を行います。
 /// `parser` は自身のパーサーインスタンスで、`iter` は単語のイテレータです。
 /// この関数は、論理式を解析し、結果の `Expression` を返します。
-fn logicalParser(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) !*Expression {
+fn logicalParser(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) !*Expression {
     var left = try comparisonParser(parser, iter, buffer);
     while (iter.peek()) |word| {
         if (word.kind == .AndOperator or word.kind == .OrOperator or word.kind == .XorOperator) {
             _ = iter.next();
             const right = try comparisonParser(parser, iter, buffer);
-            const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+            const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
             expr.* = .{ .parser = parser, .data = .{ .BinaryExpress = .{ .kind = word.kind, .left = left, .right = right } } };
             left = expr;
         } else {
@@ -60,13 +59,13 @@ fn logicalParser(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalys
 /// 比較式の解析を行います。
 /// `parser` は自身のパーサーインスタンスで、`iter` は単語のイテレータです。
 /// この関数は、比較式を解析し、結果の `Expression` を返します。
-fn comparisonParser(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) AllErrors!*Expression {
+fn comparisonParser(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) Errors!*Expression {
     var left = try additionOrSubtractionParser(parser, iter, buffer);
     while (iter.peek()) |word| {
         if (word.kind == .GreaterEqual or word.kind == .LessEqual or word.kind == .GreaterThan or word.kind == .LessThan or word.kind == .Equal or word.kind == .NotEqual) {
             _ = iter.next();
             const right = try additionOrSubtractionParser(parser, iter, buffer);
-            const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+            const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
             expr.* = .{ .parser = parser, .data = .{ .BinaryExpress = .{ .kind = word.kind, .left = left, .right = right } } };
             left = expr;
         } else {
@@ -79,13 +78,13 @@ fn comparisonParser(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAna
 /// 加算または減算の解析を行います。
 /// `parser` は自身のパーサーインスタンスで、`iter` は単語のイテレータです。
 /// この関数は、加算または減算の式を解析し、結果の `Expression` を返します。
-fn additionOrSubtractionParser(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) AllErrors!*Expression {
+fn additionOrSubtractionParser(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) Errors!*Expression {
     var left = try multiplyOrDevisionParser(parser, iter, buffer);
     while (iter.peek()) |word| {
         if (word.kind == .Plus or word.kind == .Minus) {
             _ = iter.next();
             const right = try multiplyOrDevisionParser(parser, iter, buffer);
-            const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+            const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
             expr.* = .{ .parser = parser, .data = .{ .BinaryExpress = .{ .kind = word.kind, .left = left, .right = right } } };
             left = expr;
         } else {
@@ -98,13 +97,13 @@ fn additionOrSubtractionParser(parser: *Parser, iter: *AnalysisIterator.Iterator
 /// 乗算または除算の解析を行います。
 /// `parser` は自身のパーサーインスタンスで、`iter` は単語のイテレータです。
 /// この関数は、乗算または除算の式を解析し、結果の `Expression` を返します。
-fn multiplyOrDevisionParser(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) AllErrors!*Expression {
+fn multiplyOrDevisionParser(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) Errors!*Expression {
     var left = try parseFactor(parser, iter, buffer);
     while (iter.peek()) |word| {
         if (word.kind == .Multiply or word.kind == .Devision) {
             _ = iter.next();
             const right = try parseFactor(parser, iter, buffer);
-            const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+            const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
             expr.* = .{ .parser = parser, .data = .{ .BinaryExpress = .{ .kind = word.kind, .left = left, .right = right } } };
             left = expr;
         } else {
@@ -117,7 +116,7 @@ fn multiplyOrDevisionParser(parser: *Parser, iter: *AnalysisIterator.Iterator(Le
 /// 単項式の解析を行います。
 /// `parser` は自身のパーサーインスタンスで、`iter` は単語のイテレータです。
 /// この関数は、単項式を解析し、結果の `Expression` を返します。
-fn parseFactor(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) AllErrors!*Expression {
+fn parseFactor(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) Errors!*Expression {
     if (iter.peek()) |word| {
         switch (word.kind) {
             .LeftParen => {
@@ -131,32 +130,32 @@ fn parseFactor(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis
             },
             .Number => {
                 _ = iter.next();
-                const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+                const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
                 expr.* = .{ .parser = parser, .data = .{ .NumberExpress = try parseNumber(parser, word.str.raw()) } };
                 return expr;
             },
             .StringLiteral => {
                 _ = iter.next();
-                const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+                const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
                 expr.* = .{ .parser = parser, .data = .{ .StringExpress = try parseStringLiteral(parser, word.str.raw(), buffer) } };
                 return expr;
             },
             .Plus, .Minus, .Not => {
                 _ = iter.next();
                 const nextExpr = try parseFactor(parser, iter, buffer);
-                const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+                const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
                 expr.* = .{ .parser = parser, .data = .{ .UnaryExpress = .{ .kind = word.kind, .expr = nextExpr } } };
                 return expr;
             },
             .TrueLiteral => {
                 _ = iter.next();
-                const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+                const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
                 expr.* = .{ .parser = parser, .data = .{ .BooleanExpress = true } };
                 return expr;
             },
             .FalseLiteral => {
                 _ = iter.next();
-                const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
+                const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
                 expr.* = .{ .parser = parser, .data = .{ .BooleanExpress = false } };
                 return expr;
             },
@@ -168,14 +167,14 @@ fn parseFactor(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis
 
 /// 文字列を数値にします。
 /// `parser` は自身のパーサーインスタンスで、`str` は数値の文字列スライスです。
-/// この関数は、数値の単語を解析し、結果の `Expression` を返します。
-fn parseNumber(_: *Parser, str: []const u8) AllErrors!f64 {
-    return std.fmt.parseFloat(f64, str) catch return AllErrors.OutOfMemoryNumber;
+/// この関数は、数値の単語を解析し、結果の数値を返します。
+fn parseNumber(_: *Parser, str: []const u8) Errors!f64 {
+    return std.fmt.parseFloat(f64, str) catch return Errors.OutOfMemoryNumber;
 }
 
 /// 文字列リテラルを解析します。
 /// `parser` は自身のパーサーインスタンスで、`str` は文字列リテラルのスライスです。
-fn parseStringLiteral(parser: *Parser, source: []const u8, buffer: *ArrayList(u8)) AllErrors!*String {
+fn parseStringLiteral(parser: *Parser, source: []const u8, buffer: *ArrayList(u8)) Errors!*String {
     buffer.clearRetainingCapacity();
 
     const quote = source[0];
@@ -190,30 +189,30 @@ fn parseStringLiteral(parser: *Parser, source: []const u8, buffer: *ArrayList(u8
             src_ptr += 1;
             if (@intFromPtr(src_ptr) < @intFromPtr(source.ptr + source.len - 1)) {
                 switch (src_ptr[0]) {
-                    'n' => buffer.append('\n') catch return AllErrors.OutOfMemoryString,
-                    't' => buffer.append('\t') catch return AllErrors.OutOfMemoryString,
-                    '\\' => buffer.append('\\') catch return AllErrors.OutOfMemoryString,
-                    '"' => buffer.append('"') catch return AllErrors.OutOfMemoryString,
-                    '\'' => buffer.append('\'') catch return AllErrors.OutOfMemoryString,
+                    'n' => buffer.append('\n') catch return Errors.OutOfMemoryString,
+                    't' => buffer.append('\t') catch return Errors.OutOfMemoryString,
+                    '\\' => buffer.append('\\') catch return Errors.OutOfMemoryString,
+                    '"' => buffer.append('"') catch return Errors.OutOfMemoryString,
+                    '\'' => buffer.append('\'') catch return Errors.OutOfMemoryString,
                     else => {},
                 }
                 src_ptr += 1;
             } else {
-                return AllErrors.EvaluationFailed;
+                return Errors.EvaluationFailed;
             }
         } else {
-            buffer.append(src_ptr[0]) catch return AllErrors.OutOfMemoryString;
+            buffer.append(src_ptr[0]) catch return Errors.OutOfMemoryString;
             src_ptr += 1;
         }
     }
-    return parser.string_store.get(.{ buffer.items, buffer.items.len }) catch return AllErrors.OutOfMemoryString;
+    return parser.string_store.get(.{ buffer.items, buffer.items.len }) catch return Errors.OutOfMemoryString;
 }
 
 /// 括弧で囲まれた式を解析します。
 /// `parser` は自身のパーサーインスタンスで、`iter` は単語のイテレータです。
 /// この関数は、左括弧が見つかった場合に括弧内の式を解析し、結果の `Expression` を返します。
 /// もし左括弧が見つからなかった場合は、論理式の解析を行います。
-fn parseParen(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) AllErrors!*Expression {
+fn parseParen(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) Errors!*Expression {
     if (iter.peek()) |word| {
         if (word.kind == .LeftParen) {
             _ = iter.next();
@@ -229,7 +228,7 @@ fn parseParen(parser: *Parser, iter: *AnalysisIterator.Iterator(LexicalAnalysis.
 /// `LParen` と `RParen` は、左括弧と右括弧の種類を指定します。
 /// `next_parser` は、括弧内の式を解析するための次のパーサー関数です。
 /// この関数は、括弧内の式を解析し、結果の `Expression` を返します。
-fn parenBlockParser(parser: *Parser, comptime LParen: LexicalAnalysis.WordType, comptime RParen: LexicalAnalysis.WordType, iter: *AnalysisIterator.Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) AllErrors!*Expression {
+fn parenBlockParser(parser: *Parser, comptime LParen: LexicalAnalysis.WordType, comptime RParen: LexicalAnalysis.WordType, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) Errors!*Expression {
     const start = iter.index;
     var end: usize = iter.index;
     var lv: u8 = 0;
@@ -255,8 +254,8 @@ fn parenBlockParser(parser: *Parser, comptime LParen: LexicalAnalysis.WordType, 
     }
 
     // 括弧内の式を解析
-    const expr = parser.expr_store.get({}) catch return AllErrors.OutOfMemoryExpression;
-    var in_iter = AnalysisIterator.Iterator((LexicalAnalysis.Word)).init(iter.items[start..end], 0);
+    const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+    var in_iter = Iterator((LexicalAnalysis.Word)).init(iter.items[start..end]);
     expr.* = .{ .parser = parser, .data = .{ .ParenExpress = .{ .inner = try logicalParser(parser, &in_iter, buffer) } } };
     return expr;
 }

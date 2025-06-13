@@ -2,7 +2,7 @@
 //! you are building an executable. If you are making a library, the convention
 //! is to delete this file and start with root.zig instead.
 
-const String = @import("zoppa_helper/string.zig").String;
+const String = @import("zoppa_helper/strings/string.zig").String;
 
 pub fn main() !void {
     // 英語の文字列を作成して表示します

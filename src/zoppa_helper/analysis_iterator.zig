@@ -1,16 +1,15 @@
 const std = @import("std");
 const testing = std.testing;
-const Allocator = std.mem.Allocator;
 
 /// 単語、ブロックのイテレータ。
-pub fn Iterator(comptime T: type) type {
+pub fn AnalysisIterator(comptime T: type) type {
     return struct {
         /// 単語のリスト
         items: []T,
         index: usize,
 
-        pub fn init(items: []T, index: usize) @This() {
-            return .{ .items = items, .index = index };
+        pub fn init(items: []T) @This() {
+            return .{ .items = items, .index = 0 };
         }
 
         /// 次の要素が存在するかどうかを確認します。
@@ -38,4 +37,25 @@ pub fn Iterator(comptime T: type) type {
             }
         }
     };
+}
+
+test "AnalysisIterator" {
+    var values: [5]u32 = .{ 1, 2, 3, 4, 5 };
+    var it = AnalysisIterator(u32).init(&values);
+
+    try testing.expect(it.hasNext());
+    try testing.expectEqual(1, it.peek());
+    try testing.expectEqual(1, it.next());
+    try testing.expectEqual(2, it.peek());
+    try testing.expectEqual(2, it.next());
+    try testing.expect(it.hasNext());
+    try testing.expectEqual(3, it.peek());
+    try testing.expectEqual(3, it.next());
+    try testing.expect(it.hasNext());
+    try testing.expectEqual(4, it.peek());
+    try testing.expectEqual(4, it.next());
+    try testing.expect(it.hasNext());
+    try testing.expectEqual(5, it.peek());
+    try testing.expectEqual(5, it.next());
+    try testing.expect(!it.hasNext());
 }

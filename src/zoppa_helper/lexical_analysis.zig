@@ -1,25 +1,9 @@
 const std = @import("std");
-const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const String = @import("string.zig").String;
-const Char = @import("char.zig").Char;
+const String = @import("strings/string.zig").String;
+const Char = @import("strings/char.zig").Char;
 const ArrayList = std.ArrayList;
-
-/// エラー列挙型
-pub const LexicalError = error{
-    /// 単語解析エラー
-    WordAnalysisError,
-    /// ブロック解析エラー
-    BlockAnalysisError,
-    /// アンダーバーの連続エラー
-    ConsecutiveUnderscoreError,
-    /// 文字列リテラルが閉じられていない場合はエラー
-    UnclosedStringLiteralError,
-    /// ブロックが閉じられていない場合はエラー
-    UnclosedBlockError,
-    /// 無効なコマンドの場合はエラー
-    InvalidCommandError,
-};
+const LexicalError = @import("analysis_error.zig").LexicalError;
 
 /// 単語の種類を表す列挙型。
 /// 各単語は、識別子、数字、演算子、句読点、キーワードなどの種類を持ちます。
@@ -56,11 +40,29 @@ pub const WordType = enum {
     XorOperator, // 排他的論理和
 };
 
+/// 埋め込み式の種類を表す列挙型。
+pub const EmbeddedType = enum {
+    None, // なし
+    Unfold, // 展開部
+    NoEscapeUnfold, // エスケープなし展開部
+    IfBlock, // ifブロック
+    ElseIfBlock, // else ifブロック
+    ElseBlock, // elseブロック
+    EndIfBlock, // endifブロック
+};
+
 /// 単語を表す構造体。
 /// 単語は文字列とその種類を持ちます。
 pub const Word = struct {
     str: String,
     kind: WordType,
+};
+
+/// 埋め込み式を表す構造体。
+/// 埋め込み式は、文字列とその種類を持ちます。
+pub const EmbeddedText = struct {
+    str: String,
+    kind: EmbeddedType,
 };
 
 /// 文字列をトークンに分割します。
@@ -363,29 +365,10 @@ fn getNumberToken(input: *const String, iter: *String.Iterator) !String {
     return String.fromBytes(input.raw(), start, iter.current_index - start);
 }
 
-/// ブロックの種類を表す列挙型。
-/// ブロックは、識別子やキーワードなどの特定の種類の文字列を表します。
-pub const BlockType = enum {
-    Text, // テキスト部
-    Unfold, // 展開部
-    NoEscapeUnfold, // エスケープなし展開部
-    IfBlock, // ifブロック
-    ElseIfBlock, // else ifブロック
-    ElseBlock, // elseブロック
-    EndIfBlock, // endifブロック
-};
-
-/// ブロックを表す構造体。
-/// ブロックは、文字列とその種類を持ちます。
-pub const Block = struct {
-    str: String,
-    kind: BlockType,
-};
-
-/// 文字列をブロックに分割します。
+/// 文字列を埋め込み式、埋め込み式以外に分割します。
 /// 入力文字列を解析して、ブロックのリストを生成します。
-pub fn splitBlocks(input: *const String, allocator: Allocator) ![]Block {
-    var tokens = ArrayList(Block).init(allocator);
+pub fn splitEmbeddedText(input: *const String, allocator: Allocator) ![]EmbeddedText {
+    var tokens = ArrayList(EmbeddedText).init(allocator);
     defer tokens.deinit();
 
     var iter = input.iterate();
@@ -394,9 +377,9 @@ pub fn splitBlocks(input: *const String, allocator: Allocator) ![]Block {
         if (pc) |c| {
             const word = switch (c.source[0]) {
                 '{' => try getCommandBlock(input, &iter),
-                '#' => try getUnfoldBlock(input, &iter, BlockType.Unfold),
-                '!' => try getUnfoldBlock(input, &iter, BlockType.NoEscapeUnfold),
-                else => Block{ .str = getTextBlock(input, &iter), .kind = BlockType.Text },
+                '#' => try getUnfoldBlock(input, &iter, EmbeddedType.Unfold),
+                '!' => try getUnfoldBlock(input, &iter, EmbeddedType.NoEscapeUnfold),
+                else => EmbeddedText{ .str = getTextBlock(input, &iter), .kind = EmbeddedType.None },
             };
             try tokens.append(word);
         }
@@ -404,42 +387,42 @@ pub fn splitBlocks(input: *const String, allocator: Allocator) ![]Block {
     return tokens.toOwnedSlice();
 }
 
-/// コマンドブロックを取得します。
-/// コマンドブロックは、{ で始まり、} で終わる文字列です。
-fn getCommandBlock(input: *const String, iter: *String.Iterator) !Block {
+/// 埋め込み式を取得します。
+/// 埋め込み式は、{ で始まり、} で終わる文字列です。
+fn getCommandBlock(input: *const String, iter: *String.Iterator) !EmbeddedText {
     const cmd = try getCommandBlockString(input, iter, false);
     if (cmd.startWithLiteral("{if") and cmd.at(3).?.isWhiteSpace()) {
-        return .{ .str = cmd.mid(4, cmd.len() - 5), .kind = BlockType.IfBlock };
+        return .{ .str = cmd.mid(4, cmd.len() - 5), .kind = EmbeddedType.IfBlock };
     } else if (cmd.startWithLiteral("{else if") and cmd.at(8).?.isWhiteSpace()) {
-        return .{ .str = cmd.mid(9, cmd.len() - 10), .kind = BlockType.ElseIfBlock };
+        return .{ .str = cmd.mid(9, cmd.len() - 10), .kind = EmbeddedType.ElseIfBlock };
     } else if (cmd.startWithLiteral("{elseif") and cmd.at(7).?.isWhiteSpace()) {
-        return .{ .str = cmd.mid(8, cmd.len() - 9), .kind = BlockType.ElseIfBlock };
+        return .{ .str = cmd.mid(8, cmd.len() - 9), .kind = EmbeddedType.ElseIfBlock };
     } else if (cmd.eqlLiteral("{else}")) {
-        return .{ .str = cmd, .kind = BlockType.ElseBlock };
+        return .{ .str = cmd, .kind = EmbeddedType.ElseBlock };
     } else if (cmd.eqlLiteral("{/if}")) {
-        return .{ .str = cmd, .kind = BlockType.EndIfBlock };
+        return .{ .str = cmd, .kind = EmbeddedType.EndIfBlock };
     } else {
         return error.InvalidCommandError;
     }
 }
 
-/// 展開ブロックを取得します。
-/// 展開ブロックは、# または ! で始まり、{ で終わる文字列です。
-fn getUnfoldBlock(input: *const String, iter: *String.Iterator, blkType: BlockType) !Block {
+/// 展開埋め込み式を取得します。
+/// 展開埋め込み式は、# または ! で始まり、{ で終わる文字列です。
+fn getUnfoldBlock(input: *const String, iter: *String.Iterator, blkType: EmbeddedType) !EmbeddedText {
     if (iter.skip(1)) |lc| {
         if (lc.len == 1) {
             if (lc.source[0] != '{') {
-                return .{ .str = getTextBlock(input, iter), .kind = BlockType.Text };
+                return .{ .str = getTextBlock(input, iter), .kind = EmbeddedType.None };
             }
         }
         return .{ .str = try getCommandBlockString(input, iter, true), .kind = blkType };
     } else {
-        return .{ .str = getTextBlock(input, iter), .kind = BlockType.Text };
+        return .{ .str = getTextBlock(input, iter), .kind = EmbeddedType.None };
     }
 }
 
-/// コマンドブロック内の文字列を取得します。
-/// コマンドブロックは、{ で始まり、} で終わる文字列です。
+/// コマンド埋め込み式内の文字列を取得します。
+/// コマンド埋め込み式は、{ で始まり、} で終わる文字列です。
 fn getCommandBlockString(input: *const String, iter: *String.Iterator, isSkip: bool) !String {
     const start = iter.current_index;
     if (isSkip) {
@@ -448,7 +431,7 @@ fn getCommandBlockString(input: *const String, iter: *String.Iterator, isSkip: b
     _ = iter.next();
     var closed = false;
 
-    // ブロックの終わりを探す
+    // 埋め込み式の終わりを探す
     while (iter.hasNext()) {
         const c = iter.next().?;
         if (c.len == 1) {
@@ -475,14 +458,14 @@ fn getCommandBlockString(input: *const String, iter: *String.Iterator, isSkip: b
     }
 
     if (!closed) {
-        // ブロックが閉じられていない場合はエラー
+        // 埋め込み式が閉じられていない場合はエラー
         return LexicalError.UnclosedBlockError;
     }
     return String.fromBytes(input.raw(), start, iter.current_index - start);
 }
 
-/// テキストブロック内のテキストを取得します。
-/// テキストブロックは、{ や #, ! などのコマンドが見つかるまでの文字列です。
+/// 埋め込み式以外のテキストを取得します。
+/// 埋め込み式以外は、{ や #, ! などのコマンドが見つかるまでの文字列です。
 fn getTextBlock(input: *const String, iter: *String.Iterator) String {
     const start = iter.current_index;
 

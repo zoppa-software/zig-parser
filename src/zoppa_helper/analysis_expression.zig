@@ -1,0 +1,368 @@
+const std = @import("std");
+const testing = std.testing;
+const Allocator = std.mem.Allocator;
+const String = @import("strings/string.zig").String;
+const ArrayList = std.ArrayList;
+const LexicalAnalysis = @import("lexical_analysis.zig");
+const ParserAnalysis = @import("parser_analysis.zig");
+const Value = @import("analysis_value.zig").AnalysisValue;
+const Errors = @import("analysis_error.zig").AnalysisErrors;
+
+/// 式の定義
+pub const AnalysisExpression = struct {
+    parser: *ParserAnalysis.AnalysisParser,
+
+    /// 式の種類を表す列挙型。
+    data: union(enum) {
+        ListExpress: struct { exprs: []*AnalysisExpression },
+        UnfoldExpress: *String,
+        NoEscapeUnfoldExpress: *String,
+        IfExpress: struct { exprs: []*AnalysisExpression },
+        IfConditionExpress: struct { condition: *String, inner: *AnalysisExpression },
+        ElseExpress: struct { inner: *AnalysisExpression },
+        TernaryExpress: struct { condition: *AnalysisExpression, true_expr: *AnalysisExpression, false_expr: *AnalysisExpression },
+        ParenExpress: struct { inner: *AnalysisExpression },
+        BinaryExpress: struct { kind: LexicalAnalysis.WordType, left: *AnalysisExpression, right: *AnalysisExpression },
+        UnaryExpress: struct { kind: LexicalAnalysis.WordType, expr: *AnalysisExpression },
+        NumberExpress: f64,
+        StringExpress: *String,
+        BooleanExpress: bool,
+    },
+
+    /// 式を評価して値を取得します。
+    /// この関数は、式の種類に応じて適切な評価を行い、結果の値を返します。
+    pub fn get(self: *const AnalysisExpression) Errors!Value {
+        return switch (self.*.data) {
+            .ListExpress => |expr| {
+                var values = ArrayList(u8).init(self.parser.allocator);
+                defer values.deinit();
+                for (expr.exprs) |e| {
+                    const value = try e.get();
+                    values.appendUnalignedSlice(value.String.raw()) catch return error.OutOfMemoryString;
+                }
+                const tmp: *String = self.parser.string_store.get(.{ [_]u8{}, 0 }) catch return error.OutOfMemoryString;
+                const vtp: []u8 = values.toOwnedSlice() catch return error.OutOfMemoryString;
+                defer self.parser.allocator.free(vtp);
+                tmp.* = String.newString(self.parser.allocator, vtp) catch return error.OutOfMemoryString;
+                return .{ .String = tmp };
+            },
+            .UnfoldExpress => |str| {
+                const expr = self.parser.executes(str) catch return error.EvaluationFailed;
+                return switch (try expr.get()) {
+                    .String => |s| .{ .String = s },
+                    .Number => |n| {
+                        const msg = std.fmt.allocPrint(self.parser.allocator, "{d}", .{n}) catch return error.OutOfMemoryString;
+                        defer self.parser.allocator.free(msg);
+                        return .{ .String = self.parser.string_store.get(.{ msg, msg.len }) catch return error.OutOfMemoryString };
+                    },
+                    else => return error.EvaluationFailed,
+                };
+            },
+            .IfExpress => |expr| {
+                for (expr.exprs) |e| {
+                    switch (e.data) {
+                        .IfConditionExpress => |con| {
+                            const condition = try e.get();
+                            if (condition.Boolean) {
+                                return con.inner.get() catch return error.EvaluationFailed;
+                            }
+                        },
+                        .ElseExpress => {
+                            return try e.get();
+                        },
+                        else => {},
+                    }
+                }
+                const tmp: *String = self.parser.string_store.get(.{ [_]u8{}, 0 }) catch return error.OutOfMemoryString;
+                return .{ .String = tmp };
+            },
+            .IfConditionExpress => |str| {
+                const expr = self.parser.executes(str.condition) catch return error.EvaluationFailed;
+                const condition = try expr.get();
+                return switch (condition) {
+                    .Boolean => condition,
+                    else => return error.EvaluationFailed,
+                };
+            },
+            .ElseExpress => |expr| expr.inner.get(),
+            .NoEscapeUnfoldExpress => |str| .{ .String = str },
+            .TernaryExpress => |expr| executesTernary(expr.condition, expr.true_expr, expr.false_expr),
+            .ParenExpress => |expr| expr.inner.get(),
+            .BinaryExpress => |expr| self.executesBinary(expr.kind, expr.left, expr.right),
+            .UnaryExpress => |expr| executesUnary(expr.kind, expr.expr),
+            .NumberExpress => .{ .Number = self.data.NumberExpress },
+            .StringExpress => |str| .{ .String = str },
+            .BooleanExpress => |bol| .{ .Boolean = bol },
+        };
+    }
+
+    /// 三項演算子を実行します。
+    /// `expr` は三項演算子の式で、条件に応じて真の値または偽の値を返します。
+    /// この関数は、三項演算子の条件を評価し、結果の値を返します。
+    /// `condition` は条件式、`true_expr` は真の場合の式、`false_expr` は偽の場合の式です。
+    fn executesTernary(condition: *AnalysisExpression, true_expr: *AnalysisExpression, false_expr: *AnalysisExpression) Errors!Value {
+        const conditionValue = try condition.get();
+        if (conditionValue.Boolean) {
+            return try true_expr.get();
+        } else {
+            return try false_expr.get();
+        }
+    }
+
+    /// 単項演算子を実行します。
+    /// `kind` は演算子の種類で、`expr` は対象の式です。
+    /// この関数は、単項演算子を適用し、結果の値を返します。
+    fn executesUnary(kind: LexicalAnalysis.WordType, expr: *AnalysisExpression) Errors!Value {
+        const value = try expr.get();
+        return switch (kind) {
+            .Plus => switch (value) {
+                .Number => .{ .Number = value.Number },
+                else => error.UnaryOperatorNotSupported,
+            },
+            .Minus => switch (value) {
+                .Number => .{ .Number = -value.Number },
+                else => error.UnaryOperatorNotSupported,
+            },
+            .Not => switch (value) {
+                .Boolean => .{ .Boolean = !value.Boolean },
+                else => error.UnaryOperatorNotSupported,
+            },
+            else => error.UnaryOperatorNotSupported,
+        };
+    }
+
+    /// バイナリ式を実行します。
+    /// `kind` は演算子の種類で、`left` と `right` は左辺と右辺の式です。
+    /// この関数は、バイナリ演算子を適用し、結果の値を返します。
+    fn executesBinary(self: *const AnalysisExpression, kind: LexicalAnalysis.WordType, left: *AnalysisExpression, right: *AnalysisExpression) Errors!Value {
+        const leftValue = try left.get();
+        const rightValue = try right.get();
+        return switch (kind) {
+            .Plus => self.additionExpression(leftValue, rightValue),
+            .Minus => subtractionExpression(leftValue, rightValue),
+            .Multiply => multiplicationExpression(leftValue, rightValue),
+            .Devision => divisionExpression(leftValue, rightValue),
+            .AndOperator => andExpression(leftValue, rightValue),
+            .OrOperator => orExpression(leftValue, rightValue),
+            .XorOperator => xorExpression(leftValue, rightValue),
+            .GreaterThan => greaterExpression(leftValue, rightValue),
+            .GreaterEqual => greaterEqualExpression(leftValue, rightValue),
+            .LessThan => lessExpression(leftValue, rightValue),
+            .LessEqual => lessEqualExpression(leftValue, rightValue),
+            .Equal => equalExpression(leftValue, rightValue),
+            .NotEqual => notEqualExpression(leftValue, rightValue),
+            else => error.BinaryOperatorNotSupported,
+        };
+    }
+
+    /// より大きいを実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn greaterExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => blk: {
+                    const res = @abs(leftValue.Number - rightValue.Number);
+                    break :blk .{ .Boolean = leftValue.Number > rightValue.Number and res > std.math.nextAfter(f64, 0, 1) };
+                },
+                else => error.GreaterOperatorNotSupported,
+            },
+            .String => switch (rightValue) {
+                .String => .{ .Boolean = leftValue.String.compare(rightValue.String) == String.Order.greater },
+                else => error.GreaterOperatorNotSupported,
+            },
+            else => error.GreaterOperatorNotSupported,
+        };
+    }
+
+    /// 以上を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn greaterEqualExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => blk: {
+                    const res = @abs(leftValue.Number - rightValue.Number);
+                    break :blk .{ .Boolean = leftValue.Number > rightValue.Number or res <= std.math.nextAfter(f64, 0, 1) };
+                },
+                else => error.GreaterEqualOperatorNotSupported,
+            },
+            .String => switch (rightValue) {
+                .String => .{ .Boolean = leftValue.String.compare(rightValue.String) != String.Order.less },
+                else => error.GreaterEqualOperatorNotSupported,
+            },
+            else => error.GreaterEqualOperatorNotSupported,
+        };
+    }
+
+    /// より小さいを実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn lessExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => blk: {
+                    const res = @abs(leftValue.Number - rightValue.Number);
+                    break :blk .{ .Boolean = leftValue.Number < rightValue.Number and res > std.math.nextAfter(f64, 0, 1) };
+                },
+                else => error.LessOperatorNotSupported,
+            },
+            .String => switch (rightValue) {
+                .String => .{ .Boolean = leftValue.String.compare(rightValue.String) == String.Order.less },
+                else => error.LessOperatorNotSupported,
+            },
+            else => error.LessOperatorNotSupported,
+        };
+    }
+
+    /// 以下を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn lessEqualExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => blk: {
+                    const res = @abs(leftValue.Number - rightValue.Number);
+                    break :blk .{ .Boolean = leftValue.Number < rightValue.Number or res <= std.math.nextAfter(f64, 0, 1) };
+                },
+                else => error.LessEqualOperatorNotSupported,
+            },
+            .String => switch (rightValue) {
+                .String => .{ .Boolean = leftValue.String.compare(rightValue.String) != String.Order.greater },
+                else => error.LessEqualOperatorNotSupported,
+            },
+            else => error.LessEqualOperatorNotSupported,
+        };
+    }
+
+    /// 等価演算子を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn equalExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => .{ .Boolean = @abs(leftValue.Number - rightValue.Number) <= std.math.nextAfter(f64, 0, 1) },
+                else => error.EqualOperatorNotSupported,
+            },
+            .String => switch (rightValue) {
+                .String => .{ .Boolean = leftValue.String.compare(rightValue.String) == String.Order.equal },
+                else => error.EqualOperatorNotSupported,
+            },
+            .Boolean => switch (rightValue) {
+                .Boolean => .{ .Boolean = leftValue.Boolean == rightValue.Boolean },
+                else => error.EqualOperatorNotSupported,
+            },
+        };
+    }
+
+    /// 不等号を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn notEqualExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => .{ .Boolean = @abs(leftValue.Number - rightValue.Number) > std.math.nextAfter(f64, 0, 1) },
+                else => error.NotEqualOperatorNotSupported,
+            },
+            .String => switch (rightValue) {
+                .String => .{ .Boolean = leftValue.String.compare(rightValue.String) != String.Order.equal },
+                else => error.NotEqualOperatorNotSupported,
+            },
+            .Boolean => switch (rightValue) {
+                .Boolean => .{ .Boolean = leftValue.Boolean != rightValue.Boolean },
+                else => error.NotEqualOperatorNotSupported,
+            },
+        };
+    }
+
+    /// 数値、文字の加算を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn additionExpression(self: *const AnalysisExpression, leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => .{ .Number = leftValue.Number + rightValue.Number },
+                else => error.CalculationFailed,
+            },
+            .String => switch (rightValue) {
+                .String => .{ .String = try self.concat(leftValue.String, rightValue.String) },
+                else => error.CalculationFailed,
+            },
+            else => error.CalculationFailed,
+        };
+    }
+
+    /// 文字列を連結します。
+    /// `left` と `right` は連結する文字列で、結果の値を返します。
+    /// この関数は、2つの文字列を連結し、新しい文字列を生成します。
+    fn concat(self: *const AnalysisExpression, left: *const String, right: *const String) Errors!*String {
+        const res = left.concat(self.parser.allocator, right) catch return error.OutOfMemoryString;
+        defer res.deinit();
+        return self.parser.string_store.get(.{ res.raw(), res.raw().len }) catch return error.OutOfMemoryString;
+    }
+
+    /// 数値の減算を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn subtractionExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => .{ .Number = leftValue.Number - rightValue.Number },
+                else => error.CalculationFailed,
+            },
+            else => error.CalculationFailed,
+        };
+    }
+
+    /// 数値の乗算を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn multiplicationExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => .{ .Number = leftValue.Number * rightValue.Number },
+                else => error.CalculationFailed,
+            },
+            else => error.CalculationFailed,
+        };
+    }
+
+    /// 数値の除算を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn divisionExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Number => switch (rightValue) {
+                .Number => if (rightValue.Number != 0) .{ .Number = leftValue.Number / rightValue.Number } else error.InvalidExpression,
+                else => error.CalculationFailed,
+            },
+            else => error.CalculationFailed,
+        };
+    }
+
+    /// AND演算子を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn andExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Boolean => switch (rightValue) {
+                .Boolean => .{ .Boolean = leftValue.Boolean and rightValue.Boolean },
+                else => error.LogicalOperationFailed,
+            },
+            else => error.LogicalOperationFailed,
+        };
+    }
+
+    /// OR演算子を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn orExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Boolean => switch (rightValue) {
+                .Boolean => .{ .Boolean = leftValue.Boolean or rightValue.Boolean },
+                else => error.LogicalOperationFailed,
+            },
+            else => error.LogicalOperationFailed,
+        };
+    }
+
+    /// XOR演算を実行します。
+    /// `leftValue` と `rightValue` はそれぞれ左辺と右辺の式です。
+    pub fn xorExpression(leftValue: Value, rightValue: Value) Errors!Value {
+        return switch (leftValue) {
+            .Boolean => switch (rightValue) {
+                .Boolean => .{ .Boolean = leftValue.Boolean != rightValue.Boolean },
+                else => error.LogicalOperationFailed,
+            },
+            else => error.LogicalOperationFailed,
+        };
+    }
+};

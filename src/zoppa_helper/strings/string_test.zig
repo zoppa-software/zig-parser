@@ -1,7 +1,7 @@
 const std = @import("std");
+const testing = std.testing;
 const String = @import("string.zig").String;
 const Char = @import("string.zig").Char;
-const testing = std.testing;
 const Allocator = std.mem.Allocator;
 
 test "newString/newSlice test" {

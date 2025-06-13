@@ -1,9 +1,21 @@
 const std = @import("std");
 const testing = std.testing;
+const expect = std.testing.expect;
 const Allocator = std.mem.Allocator;
-const Parser = @import("parser_analysis.zig").Parser;
-const ParserError = @import("parser_analysis.zig").ParserError;
-const String = @import("string.zig").String;
+const Parser = @import("parser_analysis.zig").AnalysisParser;
+const ParserError = @import("analysis_error.zig").ParserError;
+const String = @import("strings/string.zig").String;
+
+test "parser init test" {
+    const allocator = std.testing.allocator;
+    var parser = try Parser.init(allocator);
+    defer parser.deinit();
+
+    const str = String.newAllSlice("test string");
+
+    const res = try parser.string_store.get(.{ str.raw(), str.raw().len });
+    try expect(res.eqlLiteral("test string"));
+}
 
 test "logcal test" {
     const allocator = std.testing.allocator;
@@ -13,62 +25,62 @@ test "logcal test" {
     const inp1 = String.newAllSlice("true and false");
     const expr1 = try parser.executes(&inp1);
     const ans1 = try expr1.get();
-    try testing.expect(ans1.Boolean == false);
+    try expect(ans1.Boolean == false);
 
     const inp2 = String.newAllSlice("true and true");
     const expr2 = try parser.executes(&inp2);
     const ans2 = try expr2.get();
-    try testing.expect(ans2.Boolean == true);
+    try expect(ans2.Boolean == true);
 
     const inp3 = String.newAllSlice("false and false");
     const expr3 = try parser.executes(&inp3);
     const ans3 = try expr3.get();
-    try testing.expect(ans3.Boolean == false);
+    try expect(ans3.Boolean == false);
 
     const inp4 = String.newAllSlice("false and true");
     const expr4 = try parser.executes(&inp4);
     const ans4 = try expr4.get();
-    try testing.expect(ans4.Boolean == false);
+    try expect(ans4.Boolean == false);
 
     const inp5 = String.newAllSlice("true or false");
     const expr5 = try parser.executes(&inp5);
     const ans5 = try expr5.get();
-    try testing.expect(ans5.Boolean == true);
+    try expect(ans5.Boolean == true);
 
     const inp6 = String.newAllSlice("true or true");
     const expr6 = try parser.executes(&inp6);
     const ans6 = try expr6.get();
-    try testing.expect(ans6.Boolean == true);
+    try expect(ans6.Boolean == true);
 
     const inp7 = String.newAllSlice("false or false");
     const expr7 = try parser.executes(&inp7);
     const ans7 = try expr7.get();
-    try testing.expect(ans7.Boolean == false);
+    try expect(ans7.Boolean == false);
 
     const inp8 = String.newAllSlice("false or true");
     const expr8 = try parser.executes(&inp8);
     const ans8 = try expr8.get();
-    try testing.expect(ans8.Boolean == true);
+    try expect(ans8.Boolean == true);
 
     const inp9 = String.newAllSlice("true xor false");
     const expr9 = try parser.executes(&inp9);
     const ans9 = try expr9.get();
-    try testing.expect(ans9.Boolean == true);
+    try expect(ans9.Boolean == true);
 
     const inp10 = String.newAllSlice("true xor true");
     const expr10 = try parser.executes(&inp10);
     const ans10 = try expr10.get();
-    try testing.expect(ans10.Boolean == false);
+    try expect(ans10.Boolean == false);
 
     const inp11 = String.newAllSlice("false xor false");
     const expr11 = try parser.executes(&inp11);
     const ans11 = try expr11.get();
-    try testing.expect(ans11.Boolean == false);
+    try expect(ans11.Boolean == false);
 
     const inp12 = String.newAllSlice("false xor true");
     const expr12 = try parser.executes(&inp12);
     const ans12 = try expr12.get();
-    try testing.expect(ans12.Boolean == true);
+    try expect(ans12.Boolean == true);
 }
 
 test "unary test" {
@@ -577,36 +589,4 @@ test "ternaryOperatorParser test" {
     const expr6 = try parser.executes(&inp6);
     const ans6 = try expr6.get();
     try testing.expectEqualStrings("large", ans6.String.raw());
-}
-
-test "translate test" {
-    const allocator = std.testing.allocator;
-    var parser = try Parser.init(allocator);
-    defer parser.deinit();
-
-    const inp1 = String.newAllSlice("Hello, #{'World \\{\\}'}!");
-    const expr1 = try parser.translate(&inp1);
-    const ans1 = try expr1.get();
-    try testing.expectEqualStrings("Hello, World {}!", ans1.String.raw());
-
-    const inp2 = String.newAllSlice("1.1 + 1 = #{1.1 + 1}");
-    const expr2 = try parser.translate(&inp2);
-    const ans2 = try expr2.get();
-    try testing.expectEqualStrings("1.1 + 1 = 2.1", ans2.String.raw());
-}
-
-test "if block test" {
-    const allocator = std.testing.allocator;
-    var parser = try Parser.init(allocator);
-    defer parser.deinit();
-
-    const inp1 = String.newAllSlice("始めました{if 1 + 2 > 0}あいうえお{else}かきくけこ{/if}終わりました");
-    const expr1 = try parser.translate(&inp1);
-    const ans1 = try expr1.get();
-    try testing.expectEqualStrings("始めましたあいうえお終わりました", ans1.String.raw());
-
-    const inp2 = String.newAllSlice("どれが一致する? {if false}A{elseif true}{if   false   }B_1{else}B_2{/if}{else}C{/if}");
-    const expr2 = try parser.translate(&inp2);
-    const ans2 = try expr2.get();
-    try testing.expectEqualStrings("どれが一致する? B_2", ans2.String.raw());
 }
