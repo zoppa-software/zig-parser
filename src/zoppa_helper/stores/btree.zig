@@ -222,7 +222,7 @@ pub fn BTree(comptime T: type, comptime M: comptime_int, comptime compare: fn (l
                 while (ins < node.count and compare(node.values[ins], update.value) < 0) : (ins += 1) {}
 
                 // 既に同じ値が存在する場合は、エラーを返す
-                if (ins < node.values.len and compare(node.values[ins], update.value) == 0) {
+                if (ins < node.count and compare(node.values[ins], update.value) == 0) {
                     update.done = true;
                     return BTreeError.AlreadyExists;
                 }
@@ -303,7 +303,7 @@ pub fn BTree(comptime T: type, comptime M: comptime_int, comptime compare: fn (l
 
         /// B木に値が存在するかどうかを確認します。
         /// 存在する場合はtrueを返し、存在しない場合はfalseを返します。
-        pub fn contains(self: *Self, value: T) bool {
+        pub fn contains(self: *const Self, value: T) bool {
             var ptr: ?*Node = self.root;
             while (ptr) |node| {
                 var i: usize = 0;
@@ -315,6 +315,23 @@ pub fn BTree(comptime T: type, comptime M: comptime_int, comptime compare: fn (l
                 ptr = node.children[i];
             }
             return false;
+        }
+
+        /// B木から値を検索します。
+        /// 値が見つかった場合は、そのポインタを返します。
+        /// 値が見つからなかった場合は、nullを返します。
+        pub fn search(self: *const Self, value: T) ?*T {
+            var ptr: ?*Node = self.root;
+            while (ptr) |node| {
+                var i: usize = 0;
+                while (i < node.count and compare(node.values[i], value) < 0) : (i += 1) {}
+
+                if (i < node.count and compare(node.values[i], value) == 0) {
+                    return &node.values[i];
+                }
+                ptr = node.children[i];
+            }
+            return null;
         }
 
         /// B木から最大値を取得します。

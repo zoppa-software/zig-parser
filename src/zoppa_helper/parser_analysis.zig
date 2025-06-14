@@ -9,6 +9,7 @@ const Iterator = @import("analysis_iterator.zig").AnalysisIterator;
 const ParserError = @import("analysis_error.zig").ParserError;
 const Executes = @import("parser_analysis_execute.zig");
 const Embedded = @import("parser_analysis_embedded.zig");
+const Variables = @import("analysis_variables.zig").AnalysisVariableHierarchy;
 
 /// 構文解析器のモジュール。
 /// このモジュールは、文字列を解析して式を生成するための機能を提供します。
@@ -19,21 +20,25 @@ pub const AnalysisParser = struct {
     /// 自身の型
     const Self = @This();
 
+    // アロケータ
+    allocator: Allocator,
+
     // 式のストア
     expr_store: Store(Expression, 32, initExpression, deinitExpression),
 
     // 文字列のストア
     string_store: Store(String, 32, initString, deinitString),
 
-    // アロケータ
-    allocator: Allocator,
+    // 変数階層
+    variables: Variables,
 
     /// パーサーを初期化します。
     pub fn init(alloc: Allocator) !Self {
         return Self{
+            .allocator = alloc,
             .expr_store = try Store(Expression, 32, initExpression, deinitExpression).init(alloc),
             .string_store = try Store(String, 32, initString, deinitString).init(alloc),
-            .allocator = alloc,
+            .variables = try Variables.init(alloc),
         };
     }
 
@@ -41,6 +46,7 @@ pub const AnalysisParser = struct {
     pub fn deinit(self: *Self) void {
         self.expr_store.deinit();
         self.string_store.deinit();
+        self.variables.deinit();
     }
 
     /// 式の初期化関数
@@ -122,5 +128,12 @@ pub const AnalysisParser = struct {
             }
             break :blk res;
         };
+    }
+
+    pub fn getNumberExpr(self: *Self, number: f64) !*Expression {
+        // 数値式を生成します
+        const expr = try self.expr_store.get(.{});
+        expr.* = .{ .parser = self, .data = .{ .NumberExpress = number } };
+        return expr;
     }
 };

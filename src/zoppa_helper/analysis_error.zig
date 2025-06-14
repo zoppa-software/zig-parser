@@ -46,7 +46,21 @@ pub const ParserError = error{
     CalculationFailed,
     /// 論理演算に失敗した場合のエラー
     LogicalOperationFailed,
+    /// 識別子の解析に失敗した場合のエラー
+    IdentifierParseFailed,
+};
+
+/// 変数エラー列挙型
+pub const VariableError = error{
+    /// 変数の登録に失敗した場合のエラー
+    RegistrationFailed,
+    /// 変数の取得に失敗した場合のエラー
+    RetrievalFailed,
+    /// 変数の削除に失敗した場合のエラー
+    UnregistFailed,
+    /// 変数が存在しない場合のエラー
+    NotFound,
 };
 
 /// 解析エラーを表す列挙型
-pub const AnalysisErrors = LexicalError || ParserError;
+pub const AnalysisErrors = LexicalError || ParserError || VariableError;

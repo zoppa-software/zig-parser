@@ -590,3 +590,17 @@ test "ternaryOperatorParser test" {
     const ans6 = try expr6.get();
     try testing.expectEqualStrings("large", ans6.String.raw());
 }
+
+test "ident test" {
+    const allocator = std.testing.allocator;
+    var parser = try Parser.init(allocator);
+    defer parser.deinit();
+
+    const key1 = String.newAllSlice("aaaa");
+    try parser.variables.regist(&key1, try parser.getNumberExpr(8));
+
+    const inp1 = String.newAllSlice("aaaa + 1");
+    const expr1 = try parser.executes(&inp1);
+    const ans1 = try expr1.get();
+    try testing.expectEqual(9, ans1.Number);
+}

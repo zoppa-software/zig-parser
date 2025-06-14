@@ -10,28 +10,29 @@ const Parser = @import("parser_analysis.zig").AnalysisParser;
 const Expression = @import("analysis_expression.zig").AnalysisExpression;
 const Errors = @import("analysis_error.zig").AnalysisErrors;
 
-/// ブロックの解析を行います。
+/// 埋め込み式の解析を行います。
 /// `parser` は自身のパーサーインスタンスで、`iter` はブロックのイテレータです。
 /// この関数は、ブロックを解析し、結果の `Expression` を返します。
 pub fn embeddedTextParser(parser: *Parser, iter: *Iterator(LexicalAnalysis.EmbeddedText), buffer: *ArrayList(u8)) Errors!*Expression {
-    // ブロックの解析を行います
+    // バッファを作成します
     var exprs = ArrayList(*Expression).init(parser.allocator);
     defer exprs.deinit();
 
+    // 埋め込み式の解析を行います
     while (iter.hasNext()) {
-        const block = iter.peek().?;
+        const embedded = iter.peek().?;
 
-        switch (block.kind) {
+        switch (embedded.kind) {
             .None => {
-                exprs.append(try parseTextBlock(parser, block, buffer)) catch return error.OutOfMemoryExpression;
+                exprs.append(try parseTextBlock(parser, embedded, buffer)) catch return error.OutOfMemoryExpression;
                 _ = iter.next();
             },
             .Unfold => {
-                exprs.append(try parseUnfoldBlock(parser, block, buffer)) catch return error.OutOfMemoryExpression;
+                exprs.append(try parseUnfoldBlock(parser, embedded, buffer)) catch return error.OutOfMemoryExpression;
                 _ = iter.next();
             },
             .NoEscapeUnfold => {
-                exprs.append(try parseNoEscapeUnfoldBlock(parser, block, buffer)) catch return error.OutOfMemoryExpression;
+                exprs.append(try parseNoEscapeUnfoldBlock(parser, embedded, buffer)) catch return error.OutOfMemoryExpression;
                 _ = iter.next();
             },
             .IfBlock => {
@@ -54,27 +55,27 @@ pub fn embeddedTextParser(parser: *Parser, iter: *Iterator(LexicalAnalysis.Embed
     return list_expr;
 }
 
-/// テキストブロックを解析します。
-/// `parser` は自身のパーサーインスタンスで、`block` はブロックのデータです。
-fn parseTextBlock(parser: *Parser, block: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) !*Expression {
+/// 埋め込み式以外（テキスト）を解析します。
+/// `parser` は自身のパーサーインスタンスで、`embedded` は埋め込み式のデータです。
+fn parseTextBlock(parser: *Parser, embedded: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) !*Expression {
     const text_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
-    text_expr.* = .{ .parser = parser, .data = .{ .StringExpress = try unescapeBracket(parser, block.str.raw(), buffer, 0, 0) } };
+    text_expr.* = .{ .parser = parser, .data = .{ .StringExpress = try unescapeBracket(parser, embedded.str.raw(), buffer, 0, 0) } };
     return text_expr;
 }
 
-/// 展開ブロックを解析します。
-/// `parser` は自身のパーサーインスタンスで、`block` はブロックのデータです。
-fn parseUnfoldBlock(parser: *Parser, block: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) !*Expression {
+/// 展開埋め込み式を解析します。
+/// `parser` は自身のパーサーインスタンスで、`embedded` は埋め込み式のデータです。
+fn parseUnfoldBlock(parser: *Parser, embedded: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) !*Expression {
     const unfold_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
-    unfold_expr.* = .{ .parser = parser, .data = .{ .UnfoldExpress = try unescapeBracket(parser, block.str.raw(), buffer, 2, 1) } };
+    unfold_expr.* = .{ .parser = parser, .data = .{ .UnfoldExpress = try unescapeBracket(parser, embedded.str.raw(), buffer, 2, 1) } };
     return unfold_expr;
 }
 
-/// 展開ブロックを解析します（非エスケープ）
-/// `parser` は自身のパーサーインスタンスで、`block` はブロックのデータです。
-fn parseNoEscapeUnfoldBlock(parser: *Parser, block: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) !*Expression {
+/// 展開埋め込み式を解析します（非エスケープ）
+/// `parser` は自身のパーサーインスタンスで、`embedded` は埋め込み式のデータです。
+fn parseNoEscapeUnfoldBlock(parser: *Parser, embedded: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) !*Expression {
     const no_unfold_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
-    no_unfold_expr.* = .{ .parser = parser, .data = .{ .NoEscapeUnfoldExpress = try unescapeBracket(parser, block.str.raw(), buffer, 2, 1) } };
+    no_unfold_expr.* = .{ .parser = parser, .data = .{ .NoEscapeUnfoldExpress = try unescapeBracket(parser, embedded.str.raw(), buffer, 2, 1) } };
     return no_unfold_expr;
 }
 

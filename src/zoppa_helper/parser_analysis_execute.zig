@@ -159,6 +159,12 @@ fn parseFactor(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *
                 expr.* = .{ .parser = parser, .data = .{ .BooleanExpress = false } };
                 return expr;
             },
+            .Identifier => {
+                _ = iter.next();
+                const expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+                expr.* = (parser.variables.getExpr(&word.str) catch return Errors.IdentifierParseFailed).*;
+                return expr;
+            },
             else => {},
         }
     }
