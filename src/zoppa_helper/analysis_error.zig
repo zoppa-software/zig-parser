@@ -48,6 +48,26 @@ pub const ParserError = error{
     LogicalOperationFailed,
     /// 識別子の解析に失敗した場合のエラー
     IdentifierParseFailed,
+    /// サポートしていない埋め込み式
+    UnsupportedEmbeddedExpression,
+    /// 変数がセミコロンで区切られていない場合のエラー
+    VariableNotSemicolonSeparated,
+    /// 変数名が無効な場合のエラー
+    InvalidVariableName,
+    /// 変数の代入記号が無い場合のエラー
+    VariableAssignmentMissing,
+    /// 変数の値が無い場合のエラー
+    VariableValueMissing,
+    /// 数値の解析に失敗した場合のエラー
+    NumberParseFailed,
+    /// 文字列の解析に失敗した場合のエラー
+    StringParseFailed,
+    /// 条件式の解析に失敗した場合のエラー
+    ConditionParseFailed,
+    /// エスケープシーケンスの解析に失敗した場合のエラー
+    EscapeSequenceParseFailed,
+    /// 三項演算子の解析に失敗した場合のエラー
+    TernaryOperatorParseFailed,
 };
 
 /// 変数エラー列挙型

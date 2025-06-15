@@ -597,7 +597,7 @@ test "ident test" {
     defer parser.deinit();
 
     const key1 = String.newAllSlice("aaaa");
-    try parser.variables.regist(&key1, try parser.getNumberExpr(8));
+    try parser.setNumberVariable(&key1, 8);
 
     const inp1 = String.newAllSlice("aaaa + 1");
     const expr1 = try parser.executes(&inp1);

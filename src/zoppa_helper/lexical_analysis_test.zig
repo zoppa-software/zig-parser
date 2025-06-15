@@ -87,4 +87,18 @@ test "splitBlocks test" {
     try std.testing.expect(ans2[3].kind == LexicalAnalysis.EmbeddedType.None);
     try std.testing.expectEqualSlices(u8, "{/if}", ans2[4].str.raw());
     try std.testing.expect(ans2[4].kind == LexicalAnalysis.EmbeddedType.EndIfBlock);
+
+    const input3 = String.newAllSlice("${a=123; b='あいう'}{if a = 123}aは123です{/if}");
+    defer input3.deinit();
+    const ans3 = try LexicalAnalysis.splitEmbeddedText(&input3, allocator);
+    defer allocator.free(ans3);
+    try std.testing.expectEqual(4, ans3.len);
+    try std.testing.expectEqualSlices(u8, "${a=123; b='あいう'}", ans3[0].str.raw());
+    try std.testing.expect(ans3[0].kind == LexicalAnalysis.EmbeddedType.Variables);
+    try std.testing.expectEqualSlices(u8, "a = 123", ans3[1].str.raw());
+    try std.testing.expect(ans3[1].kind == LexicalAnalysis.EmbeddedType.IfBlock);
+    try std.testing.expectEqualSlices(u8, "aは123です", ans3[2].str.raw());
+    try std.testing.expect(ans3[2].kind == LexicalAnalysis.EmbeddedType.None);
+    try std.testing.expectEqualSlices(u8, "{/if}", ans3[3].str.raw());
+    try std.testing.expect(ans3[3].kind == LexicalAnalysis.EmbeddedType.EndIfBlock);
 }

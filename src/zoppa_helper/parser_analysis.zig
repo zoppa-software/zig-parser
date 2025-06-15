@@ -58,6 +58,9 @@ pub const AnalysisParser = struct {
             .ListExpress => |list_expr| {
                 alloc.free(list_expr.exprs);
             },
+            .VariableListExpress => |vlist_expr| {
+                alloc.free(vlist_expr.exprs);
+            },
             .IfExpress => |if_expr| {
                 alloc.free(if_expr.exprs);
             },
@@ -94,7 +97,7 @@ pub const AnalysisParser = struct {
 
         return blk: {
             // 解析を開始します
-            const res = Executes.ternaryOperatorParser(self, &iter, &buffer);
+            const res = try Executes.ternaryOperatorParser(self, &iter, &buffer);
 
             // 残っている単語がある場合は、無効な式とみなします
             if (iter.hasNext()) {
@@ -120,7 +123,7 @@ pub const AnalysisParser = struct {
 
         return blk: {
             // 解析を開始します
-            const res = Embedded.embeddedTextParser(self, &iter, &buffer);
+            const res = try Embedded.embeddedTextParser(self, &iter, &buffer);
 
             // 残っている単語がある場合は、無効な式とみなします
             if (iter.hasNext()) {
@@ -130,10 +133,39 @@ pub const AnalysisParser = struct {
         };
     }
 
-    pub fn getNumberExpr(self: *Self, number: f64) !*Expression {
-        // 数値式を生成します
-        const expr = try self.expr_store.get(.{});
-        expr.* = .{ .parser = self, .data = .{ .NumberExpress = number } };
-        return expr;
+    /// 数値変数を設定します。
+    pub fn setNumberVariable(self: *Self, name: *const String, number: f64) !void {
+        // 数値式を生成し、変数を登録します
+        const expr = try Expression.initNumberExpression(self, number);
+        try self.variables.regist(name, expr);
+    }
+
+    /// 文字列変数を設定します。
+    pub fn setStringVariable(self: *Self, name: *const String, str: *const String) !void {
+        // 数値式を生成し、変数を登録します
+        const expr = try Expression.initStringExpression(self, str);
+        try self.variables.regist(name, expr);
+    }
+
+    /// 真偽値変数を設定します。
+    pub fn setBooleanVariable(self: *Self, name: *const String, value: bool) !void {
+        // 真偽値式を生成、変数を登録します
+        const expr = try Expression.initBooleanExpression(self, value);
+        try self.variables.regist(name, expr);
+    }
+
+    /// 変数を取得します。
+    pub fn getVariableExpression(self: *Self, name: *const String) !*const Expression {
+        return self.variables.getExpr(name);
+    }
+
+    /// 変数群を階層にプッシュします。
+    pub fn pushVariable(self: *Self) !void {
+        try self.variables.addHierarchy();
+    }
+
+    /// 変数群を階層からポップします。
+    pub fn popVariable(self: *Self) !void {
+        try self.variables.removeHierarchy();
     }
 };

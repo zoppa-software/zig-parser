@@ -123,12 +123,11 @@ pub const AnalysisVariableHierarchy = struct {
     /// 変数を追加します。
     /// 変数が既に存在する場合は、上書きされます。
     pub fn regist(self: *Self, key: *const String, value: *const Expression) !void {
-        //var tmp: AnalysisVariables = &self.hierarchy.items[self.hierarchy.items.len - 1];
         try self.hierarchy.items[self.hierarchy.items.len - 1].regist(key, value);
     }
 
     /// 変数を取得します。
-    /// 変数が存在しない場合は、nullを返します。
+    /// 変数が存在しない場合は、`NotFound`のエラーを返します。
     pub fn getExpr(self: *Self, key: *const String) !*const Expression {
         var lv = self.hierarchy.items.len;
         while (lv > 0) : (lv -= 1) {
@@ -146,7 +145,6 @@ pub const AnalysisVariableHierarchy = struct {
     /// 変数を削除します。
     /// 変数が存在しない場合は、何もしません。
     pub fn unregist(self: *Self, key: *const String) !void {
-        //var tmp: AnalysisVariables = &self.hierarchy.items[self.hierarchy.items.len - 1];
         try self.hierarchy.items[self.hierarchy.items.len - 1].unregist(key);
     }
 
@@ -158,7 +156,7 @@ pub const AnalysisVariableHierarchy = struct {
 
     /// 変数の階層を削除します。
     pub fn removeHierarchy(self: *Self) !void {
-        if (self.hierarchy.items.len > 0) {
+        if (self.hierarchy.items.len > 1) {
             var cur: AnalysisVariables = self.hierarchy.pop().?;
             cur.deinit();
         }
@@ -203,42 +201,38 @@ test "variable init" {
 
 test "variable hierarchy init" {
     const allocator = std.testing.allocator;
-    var hierarchy = try AnalysisVariableHierarchy.init(allocator);
-    defer hierarchy.deinit();
-
     var parser = try Parser.init(allocator);
     defer parser.deinit();
 
     const key1 = String.newAllSlice("a");
     const key2 = String.newAllSlice("b");
     const key3 = String.newAllSlice("c");
-    const expr1 = Expression{ .parser = &parser, .data = .{ .NumberExpress = 5 } };
-    const expr2 = Expression{ .parser = &parser, .data = .{ .NumberExpress = 10 } };
-    const expr3 = Expression{ .parser = &parser, .data = .{ .NumberExpress = 15 } };
 
     // 変数を追加、取得と比較
-    try hierarchy.regist(&key1, &expr1);
-    try hierarchy.regist(&key2, &expr2);
-    const ans1 = try hierarchy.getExpr(&key1);
+    try parser.setNumberVariable(&key1, 5);
+    try parser.setNumberVariable(&key2, 10);
+    const ans1 = try parser.getVariableExpression(&key1);
     try std.testing.expect((try ans1.get()).Number == 5);
-    const ans2 = try hierarchy.getExpr(&key2);
+    const ans2 = try parser.getVariableExpression(&key2);
     try std.testing.expect((try ans2.get()).Number == 10);
 
     // 階層の追加と削除
-    try hierarchy.addHierarchy();
-    try hierarchy.regist(&key2, &expr3);
-    const ans1_1 = try hierarchy.getExpr(&key1);
+    try parser.pushVariable();
+    try parser.setNumberVariable(&key2, 15);
+    const ans1_1 = try parser.getVariableExpression(&key1);
     try std.testing.expect((try ans1_1.get()).Number == 5);
-    const ans1_2 = try hierarchy.getExpr(&key2);
+    const ans1_2 = try parser.getVariableExpression(&key2);
     try std.testing.expect((try ans1_2.get()).Number == 15);
-    _ = hierarchy.getExpr(&key3) catch |err| {
+
+    // 存在しない変数（key3）の取得時は、どの階層にも存在しない場合 VariableError.NotFound が返ることを期待
+    _ = parser.getVariableExpression(&key3) catch |err| {
         try std.testing.expect(err == VariableError.NotFound);
     };
 
     // 階層の削除
-    try hierarchy.removeHierarchy();
-    const ans2_1 = try hierarchy.getExpr(&key1);
+    try parser.popVariable();
+    const ans2_1 = try parser.getVariableExpression(&key1);
     try std.testing.expect((try ans2_1.get()).Number == 5);
-    const ans2_2 = try hierarchy.getExpr(&key2);
+    const ans2_2 = try parser.getVariableExpression(&key2);
     try std.testing.expect((try ans2_2.get()).Number == 10);
 }

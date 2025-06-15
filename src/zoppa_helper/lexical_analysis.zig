@@ -31,6 +31,7 @@ pub const WordType = enum {
     Hash, // ハッシュ
     Question, // クエスチョン
     Colon, // コロン
+    Semicolon, // セミコロン
     Backslash, // バックスラッシュ
     StringLiteral, // 文字列リテラル
     TrueLiteral, // 真
@@ -38,6 +39,7 @@ pub const WordType = enum {
     AndOperator, // 論理積
     OrOperator, // 論理和
     XorOperator, // 排他的論理和
+    Dollar, // ダラー
 };
 
 /// 埋め込み式の種類を表す列挙型。
@@ -45,6 +47,7 @@ pub const EmbeddedType = enum {
     None, // なし
     Unfold, // 展開部
     NoEscapeUnfold, // エスケープなし展開部
+    Variables, // 変数
     IfBlock, // ifブロック
     ElseIfBlock, // else ifブロック
     ElseBlock, // elseブロック
@@ -69,9 +72,12 @@ pub const EmbeddedText = struct {
 /// 入力文字列を解析して、単語のリストを生成します。
 /// 各単語はWord構造体で表され、文字列とその種類を持ちます。
 pub fn splitWords(input: *const String, allocator: Allocator) ![]Word {
+    // トークンを格納するためのArrayListを初期化します。
     var tokens = ArrayList(Word).init(allocator);
     defer tokens.deinit();
 
+    // 分割文字テーブルを作成します。
+    // 分割文字は、空白文字や特定の記号（例: +, -, *, /, = など）です。
     const split_char = createSplitChar();
 
     var iter = input.iterate();
@@ -79,8 +85,10 @@ pub fn splitWords(input: *const String, allocator: Allocator) ![]Word {
         const pc = iter.peek();
         if (pc) |c| {
             if (c.isWhiteSpace() or c.len > 1) {
+                // 空白文字またはマルチバイト文字が見つかった場合は次へ
                 _ = iter.next();
             } else {
+                // 1文字の場合はトークン解析します
                 const word = switchOneCharToWord(&split_char, input, &iter, c) catch {
                     return LexicalError.WordAnalysisError;
                 };
@@ -115,8 +123,10 @@ fn createSplitChar() [256]bool {
     split_char['!'] = true;
     split_char[','] = true;
     split_char['#'] = true;
+    split_char['$'] = true;
     split_char['?'] = true;
     split_char[':'] = true;
+    split_char[';'] = true;
     split_char['\\'] = true;
     split_char['.'] = true;
     split_char['\''] = true;
@@ -148,8 +158,10 @@ fn switchOneCharToWord(split_char: *const [256]bool, input: *const String, iter:
         '!' => .{ .str = getOneCharString(input, iter), .kind = WordType.Not },
         ',' => .{ .str = getOneCharString(input, iter), .kind = WordType.Comma },
         '#' => .{ .str = getOneCharString(input, iter), .kind = WordType.Hash },
+        '$' => .{ .str = getOneCharString(input, iter), .kind = WordType.Dollar },
         '?' => .{ .str = getOneCharString(input, iter), .kind = WordType.Question },
         ':' => .{ .str = getOneCharString(input, iter), .kind = WordType.Colon },
+        ';' => .{ .str = getOneCharString(input, iter), .kind = WordType.Semicolon },
         '"' => .{ .str = try getStringLiteral('"', input, iter), .kind = WordType.StringLiteral },
         '\'' => .{ .str = try getStringLiteral('\'', input, iter), .kind = WordType.StringLiteral },
         '0'...'9' =>
@@ -175,7 +187,10 @@ fn getEqualWord(input: *const String, iter: *String.Iterator) Word {
         if (lc.len == 1) {
             if (lc.source[0] == '=') {
                 // == 演算子
-                const res = Word{ .str = String.fromBytes(input.raw(), iter.current_index, 2), .kind = WordType.Equal };
+                const res = Word{
+                    .str = String.fromBytes(input.raw(), iter.current_index, 2),
+                    .kind = WordType.Equal,
+                };
                 _ = iter.next();
                 _ = iter.next();
                 return res;
@@ -193,14 +208,20 @@ fn getLessWord(input: *const String, iter: *String.Iterator) Word {
             switch (lc.source[0]) {
                 '=' => {
                     // <= 演算子
-                    const res = Word{ .str = String.fromBytes(input.raw(), iter.current_index, 2), .kind = WordType.LessEqual };
+                    const res = Word{
+                        .str = String.fromBytes(input.raw(), iter.current_index, 2),
+                        .kind = WordType.LessEqual,
+                    };
                     _ = iter.next();
                     _ = iter.next();
                     return res;
                 },
                 '>' => {
                     // <> 演算子
-                    const res = Word{ .str = String.fromBytes(input.raw(), iter.current_index, 2), .kind = WordType.NotEqual };
+                    const res = Word{
+                        .str = String.fromBytes(input.raw(), iter.current_index, 2),
+                        .kind = WordType.NotEqual,
+                    };
                     _ = iter.next();
                     _ = iter.next();
                     return res;
@@ -219,7 +240,10 @@ fn getGreaterWord(input: *const String, iter: *String.Iterator) Word {
         if (lc.len == 1) {
             if (lc.source[0] == '=') {
                 // >= 演算子
-                const res = Word{ .str = String.fromBytes(input.raw(), iter.current_index, 2), .kind = WordType.GreaterEqual };
+                const res = Word{
+                    .str = String.fromBytes(input.raw(), iter.current_index, 2),
+                    .kind = WordType.GreaterEqual,
+                };
                 _ = iter.next();
                 _ = iter.next();
                 return res;
@@ -236,6 +260,8 @@ fn getGreaterWord(input: *const String, iter: *String.Iterator) Word {
 /// 分割文字は、空白文字や特定の記号（例: +, -, *, /, = など）です。
 fn getWordString(split_char: *const [256]bool, input: *const String, iter: *String.Iterator) Word {
     const start = iter.current_index;
+
+    // イテレータを進めて、空白文字または分割文字が見つかるまで読み取る
     while (iter.hasNext()) {
         const pc = iter.peek();
         if (pc) |c| {
@@ -250,6 +276,7 @@ fn getWordString(split_char: *const [256]bool, input: *const String, iter: *Stri
         }
     }
 
+    // 文字列を取得して、キーワードかどうかを判定
     const keyword = String.fromBytes(input.raw(), start, iter.current_index - start);
     if (isKeyword(&keyword, "true")) { // 真
         return .{ .str = keyword, .kind = WordType.TrueLiteral };
@@ -296,10 +323,12 @@ fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *S
                 iter.peek() != null and iter.peek().?.len == 1 and
                 (iter.peek().?.source[0] == quote or iter.peek().?.source[0] == 't' or iter.peek().?.source[0] == 'n'))
             {
+                // エスケープ文字が見つかった場合は次の文字を無視
                 _ = iter.next();
             } else if (c.len == 1 and c.source[0] == quote and
                 iter.hasNext() and iter.peek().?.len == 1 and iter.peek().?.source[0] == quote)
             {
+                // 連続する引用符が見つかった場合は次の文字を無視
                 _ = iter.next();
             } else if (c.len == 1 and c.source[0] == quote) {
                 // 文字列リテラルが閉じられた
@@ -309,8 +338,9 @@ fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *S
         }
     }
 
+    // 文字列リテラルの終わりを判定します
+    // 文字列リテラルが閉じられていない場合はエラー
     if (!closed) {
-        // 文字列リテラルが閉じられていない場合はエラー
         return LexicalError.UnclosedStringLiteralError;
     }
     return String.fromBytes(input.raw(), start, iter.current_index - start);
@@ -325,6 +355,7 @@ fn getNumberToken(input: *const String, iter: *String.Iterator) !String {
     var dec = false;
     var num = false;
 
+    // 最初の文字が数字または符号であることを確認します
     const sign = iter.peek();
     if (sign) |c| {
         if (c.len == 1 and (c.source[0] == '+' or c.source[0] == '-')) {
@@ -333,6 +364,7 @@ fn getNumberToken(input: *const String, iter: *String.Iterator) !String {
         }
     }
 
+    // 数字または小数点が続く限り読み取ります
     while (iter.hasNext()) {
         const pc = iter.peek();
         if (pc) |c| {
@@ -379,6 +411,7 @@ pub fn splitEmbeddedText(input: *const String, allocator: Allocator) ![]Embedded
                 '{' => try getCommandBlock(input, &iter),
                 '#' => try getUnfoldBlock(input, &iter, EmbeddedType.Unfold),
                 '!' => try getUnfoldBlock(input, &iter, EmbeddedType.NoEscapeUnfold),
+                '$' => try getVariablesBlock(input, &iter),
                 else => EmbeddedText{ .str = getTextBlock(input, &iter), .kind = EmbeddedType.None },
             };
             try tokens.append(word);
@@ -401,6 +434,8 @@ fn getCommandBlock(input: *const String, iter: *String.Iterator) !EmbeddedText {
         return .{ .str = cmd, .kind = EmbeddedType.ElseBlock };
     } else if (cmd.eqlLiteral("{/if}")) {
         return .{ .str = cmd, .kind = EmbeddedType.EndIfBlock };
+    } else if (cmd.eqlLiteral("{}")) {
+        return .{ .str = cmd, .kind = EmbeddedType.EndIfBlock };
     } else {
         return error.InvalidCommandError;
     }
@@ -421,15 +456,32 @@ fn getUnfoldBlock(input: *const String, iter: *String.Iterator, blkType: Embedde
     }
 }
 
+/// 変数埋め込み式を取得します。
+/// 変数埋め込み式は、$ で始まり、{ で終わる文字列です。
+fn getVariablesBlock(input: *const String, iter: *String.Iterator) !EmbeddedText {
+    if (iter.skip(1)) |lc| {
+        if (lc.len == 1) {
+            if (lc.source[0] != '{') {
+                return .{ .str = getTextBlock(input, iter), .kind = EmbeddedType.None };
+            }
+        }
+        return .{ .str = try getCommandBlockString(input, iter, true), .kind = EmbeddedType.Variables };
+    } else {
+        return .{ .str = getTextBlock(input, iter), .kind = EmbeddedType.None };
+    }
+}
+
 /// コマンド埋め込み式内の文字列を取得します。
 /// コマンド埋め込み式は、{ で始まり、} で終わる文字列です。
-fn getCommandBlockString(input: *const String, iter: *String.Iterator, isSkip: bool) !String {
+fn getCommandBlockString(input: *const String, iter: *String.Iterator, isEmbeddedText: bool) !String {
     const start = iter.current_index;
-    if (isSkip) {
+    var closed = false;
+
+    // #, !, $ の場合は一文字飛ばす
+    if (isEmbeddedText) {
         _ = iter.next();
     }
     _ = iter.next();
-    var closed = false;
 
     // 埋め込み式の終わりを探す
     while (iter.hasNext()) {
@@ -446,7 +498,7 @@ fn getCommandBlockString(input: *const String, iter: *String.Iterator, isSkip: b
                 '\\' => {
                     const nc = iter.peek();
                     if (nc) |next_c| {
-                        if (next_c.len == 1 and (next_c.source[0] == '{' or next_c.source[0] == '}')) {
+                        if (next_c.len == 1 and isEmbeddedTextEscapeChar(next_c)) {
                             // エスケープされた { または } を無視
                             _ = iter.next();
                         }
@@ -478,8 +530,8 @@ fn getTextBlock(input: *const String, iter: *String.Iterator) String {
                     break;
                 },
 
-                // # または ! が見つかったらテキスト部の終了
-                '#', '!' => {
+                // #,!,$ が見つかったらテキスト部の終了
+                '#', '!', '$' => {
                     const nc = iter.skip(1);
                     if (nc) |next_c| {
                         if (next_c.len == 1 and next_c.source[0] == '{') {
@@ -492,8 +544,8 @@ fn getTextBlock(input: *const String, iter: *String.Iterator) String {
                 '\\' => {
                     const nc = iter.skip(1);
                     if (nc) |next_c| {
-                        if (next_c.len == 1 and (next_c.source[0] == '{' or next_c.source[0] == '}' or next_c.source[0] == '#' or next_c.source[0] == '!')) {
-                            // エスケープされた { または } を無視
+                        if (next_c.len == 1 and isNoneEmbeddedTextEscapeChar(next_c)) {
+                            // エスケープされた文字を無視
                             _ = iter.next();
                         }
                     }
@@ -504,6 +556,18 @@ fn getTextBlock(input: *const String, iter: *String.Iterator) String {
         _ = iter.next();
     }
     return String.fromBytes(input.raw(), start, iter.current_index - start);
+}
+
+/// 埋め込み式のエスケープ文字かどうかを判定します。
+/// 埋め込み式のエスケープ文字は、{ または } です。
+pub fn isEmbeddedTextEscapeChar(input: Char) bool {
+    return input.source[0] == '{' or input.source[0] == '}';
+}
+
+/// 埋め込み式以外のエスケープ文字かどうかを判定します。
+/// 埋め込み式以外のエスケープ文字は、{, }, #, !, $ です。
+pub fn isNoneEmbeddedTextEscapeChar(input: Char) bool {
+    return input.source[0] == '{' or input.source[0] == '}' or input.source[0] == '#' or input.source[0] == '!' or input.source[0] == '$';
 }
 
 test "getStringLiteral test" {

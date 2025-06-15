@@ -5,6 +5,7 @@ const String = @import("strings/string.zig").String;
 const ArrayList = std.ArrayList;
 const LexicalAnalysis = @import("lexical_analysis.zig");
 const ParserAnalysis = @import("parser_analysis.zig");
+const Parser = ParserAnalysis.AnalysisParser;
 const Value = @import("analysis_value.zig").AnalysisValue;
 const Errors = @import("analysis_error.zig").AnalysisErrors;
 
@@ -17,6 +18,8 @@ pub const AnalysisExpression = struct {
         ListExpress: struct { exprs: []*AnalysisExpression },
         UnfoldExpress: *String,
         NoEscapeUnfoldExpress: *String,
+        VariableListExpress: struct { exprs: []*AnalysisExpression },
+        VariableExpress: struct { name: *String, value: *AnalysisExpression },
         IfExpress: struct { exprs: []*AnalysisExpression },
         IfConditionExpress: struct { condition: *String, inner: *AnalysisExpression },
         ElseExpress: struct { inner: *AnalysisExpression },
@@ -25,9 +28,140 @@ pub const AnalysisExpression = struct {
         BinaryExpress: struct { kind: LexicalAnalysis.WordType, left: *AnalysisExpression, right: *AnalysisExpression },
         UnaryExpress: struct { kind: LexicalAnalysis.WordType, expr: *AnalysisExpression },
         NumberExpress: f64,
-        StringExpress: *String,
+        StringExpress: *const String,
         BooleanExpress: bool,
     },
+
+    /// リストの式を初期化します。
+    /// `parser` は解析器のインスタンス、`params` は式のリストです。
+    pub fn initListExpression(parser: *Parser, params: *ArrayList(*AnalysisExpression)) Errors!*AnalysisExpression {
+        const list_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        const list_exprs = params.toOwnedSlice() catch return Errors.OutOfMemoryExpression;
+        list_expr.* = .{ .parser = parser, .data = .{ .ListExpress = .{ .exprs = list_exprs } } };
+        return list_expr;
+    }
+
+    /// 展開式を初期化します。
+    /// `parser` は解析器のインスタンス、`params` は展開する文字列です。
+    pub fn initUnfoldExpression(parser: *Parser, params: *String) Errors!*AnalysisExpression {
+        const unfold_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        unfold_expr.* = .{ .parser = parser, .data = .{ .UnfoldExpress = params } };
+        return unfold_expr;
+    }
+
+    /// 非エスケープ展開式を初期化します。
+    /// `parser` は解析器のインスタンス、`params` は展開する文字列です。
+    pub fn initNoEscapeUnfoldExpression(parser: *Parser, params: *String) Errors!*AnalysisExpression {
+        const no_unfold_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        no_unfold_expr.* = .{ .parser = parser, .data = .{ .NoEscapeUnfoldExpress = params } };
+        return no_unfold_expr;
+    }
+
+    /// 変数リストの式を初期化します。
+    /// `parser` は解析器のインスタンス、`params` は式のリストです。
+    pub fn initVariableListExpression(parser: *Parser, params: *ArrayList(*AnalysisExpression)) Errors!*AnalysisExpression {
+        const variable_list_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        const list_exprs = params.toOwnedSlice() catch return Errors.OutOfMemoryExpression;
+        variable_list_expr.* = .{ .parser = parser, .data = .{ .VariableListExpress = .{ .exprs = list_exprs } } };
+        return variable_list_expr;
+    }
+
+    /// 変数の式を初期化します。
+    /// `parser` は解析器のインスタンス、`name` は変数名、`value` は変数の値です。
+    pub fn initVariableExpression(parser: *Parser, name: *String, value: *AnalysisExpression) Errors!*AnalysisExpression {
+        const variable_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        variable_expr.* = .{ .parser = parser, .data = .{ .VariableExpress = .{ .name = name, .value = value } } };
+        return variable_expr;
+    }
+
+    /// IF文の式を初期化します。
+    /// `parser` は解析器のインスタンス、`params` はIF文の式リストです。
+    pub fn initIfExpression(parser: *Parser, params: *ArrayList(*AnalysisExpression)) Errors!*AnalysisExpression {
+        const if_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        const exprs = params.toOwnedSlice() catch return Errors.OutOfMemoryExpression;
+        if_expr.* = .{ .parser = parser, .data = .{ .IfExpress = .{ .exprs = exprs } } };
+        return if_expr;
+    }
+
+    /// IF条件の式を初期化します。
+    /// `parser` は解析器のインスタンス、`condition` は条件式、`inner` は条件が真の場合の式です。
+    pub fn initIfConditionExpression(parser: *Parser, condition: *String, inner: *AnalysisExpression) Errors!*AnalysisExpression {
+        const if_condition_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        if_condition_expr.* = .{ .parser = parser, .data = .{ .IfConditionExpress = .{ .condition = condition, .inner = inner } } };
+        return if_condition_expr;
+    }
+
+    /// ELSE文の式を初期化します。
+    /// `parser` は解析器のインスタンス、`inner` はELSE文の式です。
+    pub fn initElseExpression(parser: *Parser, inner: *AnalysisExpression) Errors!*AnalysisExpression {
+        const else_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        else_expr.* = .{ .parser = parser, .data = .{ .ElseExpress = .{ .inner = inner } } };
+        return else_expr;
+    }
+
+    /// 三項演算子の式を初期化します。
+    /// `parser` は解析器のインスタンス、`condition` は条件式、`true_expr` は真の場合の式、`false_expr` は偽の場合の式です。
+    pub fn initTernaryExpression(parser: *Parser, condition: *AnalysisExpression, true_expr: *AnalysisExpression, false_expr: *AnalysisExpression) Errors!*AnalysisExpression {
+        const ternary_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        ternary_expr.* = .{ .parser = parser, .data = .{ .TernaryExpress = .{ .condition = condition, .true_expr = true_expr, .false_expr = false_expr } } };
+        return ternary_expr;
+    }
+
+    /// 括弧の式を初期化します。
+    /// `parser` は解析器のインスタンス、`inner` は括弧内の式です。
+    pub fn initParenExpression(parser: *Parser, inner: *AnalysisExpression) Errors!*AnalysisExpression {
+        const paren_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        paren_expr.* = .{ .parser = parser, .data = .{ .ParenExpress = .{ .inner = inner } } };
+        return paren_expr;
+    }
+
+    /// バイナリ式を初期化します。
+    /// `parser` は解析器のインスタンス、`kind` は演算子の種類、`left` と `right` は左辺と右辺の式です。
+    pub fn initBinaryExpression(parser: *Parser, kind: LexicalAnalysis.WordType, left: *AnalysisExpression, right: *AnalysisExpression) Errors!*AnalysisExpression {
+        const binary_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        binary_expr.* = .{ .parser = parser, .data = .{ .BinaryExpress = .{ .kind = kind, .left = left, .right = right } } };
+        return binary_expr;
+    }
+
+    /// 単項式を初期化します。
+    /// `parser` は解析器のインスタンス、`kind` は演算子の種類、`expr` は対象の式です。
+    pub fn initUnaryExpression(parser: *Parser, kind: LexicalAnalysis.WordType, expr: *AnalysisExpression) Errors!*AnalysisExpression {
+        const unary_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        unary_expr.* = .{ .parser = parser, .data = .{ .UnaryExpress = .{ .kind = kind, .expr = expr } } };
+        return unary_expr;
+    }
+
+    /// 数値の式を初期化します。
+    /// `parser` は解析器のインスタンス、`value` は数値です。
+    pub fn initNumberExpression(parser: *Parser, value: f64) Errors!*AnalysisExpression {
+        const number_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        number_expr.* = .{ .parser = parser, .data = .{ .NumberExpress = value } };
+        return number_expr;
+    }
+
+    /// 文字列の式を初期化します。
+    /// `parser` は解析器のインスタンス、`params` は式の文字列です。
+    pub fn initStringExpression(parser: *Parser, params: *const String) Errors!*AnalysisExpression {
+        const unfold_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        unfold_expr.* = .{ .parser = parser, .data = .{ .StringExpress = params } };
+        return unfold_expr;
+    }
+
+    /// 真偽値の式を初期化します。
+    /// `parser` は解析器のインスタンス、`value` は真偽値です。
+    pub fn initBooleanExpression(parser: *Parser, value: bool) Errors!*AnalysisExpression {
+        const boolean_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        boolean_expr.* = .{ .parser = parser, .data = .{ .BooleanExpress = value } };
+        return boolean_expr;
+    }
+
+    /// 式をクローンします。
+    /// `parser` は解析器のインスタンス、`other` はクローン元の式です。
+    pub fn initFromExpression(parser: *Parser, other: *const AnalysisExpression) Errors!*AnalysisExpression {
+        const cloned_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        cloned_expr.* = other.*;
+        return cloned_expr;
+    }
 
     /// 式を評価して値を取得します。
     /// この関数は、式の種類に応じて適切な評価を行い、結果の値を返します。
@@ -38,12 +172,11 @@ pub const AnalysisExpression = struct {
                 defer values.deinit();
                 for (expr.exprs) |e| {
                     const value = try e.get();
-                    values.appendUnalignedSlice(value.String.raw()) catch return error.OutOfMemoryString;
+                    if (value.String.len() > 0) {
+                        values.appendUnalignedSlice(value.String.raw()) catch return error.OutOfMemoryString;
+                    }
                 }
-                const tmp: *String = self.parser.string_store.get(.{ [_]u8{}, 0 }) catch return error.OutOfMemoryString;
-                const vtp: []u8 = values.toOwnedSlice() catch return error.OutOfMemoryString;
-                defer self.parser.allocator.free(vtp);
-                tmp.* = String.newString(self.parser.allocator, vtp) catch return error.OutOfMemoryString;
+                const tmp = self.parser.string_store.get(.{ values.items, values.items.len }) catch return error.OutOfMemoryString;
                 return .{ .String = tmp };
             },
             .UnfoldExpress => |str| {
@@ -57,6 +190,22 @@ pub const AnalysisExpression = struct {
                     },
                     else => return error.EvaluationFailed,
                 };
+            },
+            .NoEscapeUnfoldExpress => |str| .{ .String = str },
+            .VariableListExpress => |expr| {
+                for (expr.exprs) |e| {
+                    _ = try e.get();
+                }
+                return .{ .String = &String.empty };
+            },
+            .VariableExpress => |v| {
+                switch (try v.value.get()) {
+                    .Number => |n| self.parser.setNumberVariable(v.name, n) catch return Errors.OutOfMemoryExpression,
+                    .String => |s| self.parser.setStringVariable(v.name, s) catch return Errors.OutOfMemoryExpression,
+                    .Boolean => |b| self.parser.setBooleanVariable(v.name, b) catch return Errors.OutOfMemoryExpression,
+                    //else => return Errors.InvalidExpression,
+                }
+                return .{ .String = &String.empty };
             },
             .IfExpress => |expr| {
                 for (expr.exprs) |e| {
@@ -73,8 +222,7 @@ pub const AnalysisExpression = struct {
                         else => {},
                     }
                 }
-                const tmp: *String = self.parser.string_store.get(.{ [_]u8{}, 0 }) catch return error.OutOfMemoryString;
-                return .{ .String = tmp };
+                return .{ .String = &String.empty };
             },
             .IfConditionExpress => |str| {
                 const expr = self.parser.executes(str.condition) catch return error.EvaluationFailed;
@@ -85,7 +233,6 @@ pub const AnalysisExpression = struct {
                 };
             },
             .ElseExpress => |expr| expr.inner.get(),
-            .NoEscapeUnfoldExpress => |str| .{ .String = str },
             .TernaryExpress => |expr| executesTernary(expr.condition, expr.true_expr, expr.false_expr),
             .ParenExpress => |expr| expr.inner.get(),
             .BinaryExpress => |expr| self.executesBinary(expr.kind, expr.left, expr.right),
@@ -289,9 +436,9 @@ pub const AnalysisExpression = struct {
     /// `left` と `right` は連結する文字列で、結果の値を返します。
     /// この関数は、2つの文字列を連結し、新しい文字列を生成します。
     fn concat(self: *const AnalysisExpression, left: *const String, right: *const String) Errors!*String {
-        const res = left.concat(self.parser.allocator, right) catch return error.OutOfMemoryString;
-        defer res.deinit();
-        return self.parser.string_store.get(.{ res.raw(), res.raw().len }) catch return error.OutOfMemoryString;
+        const res = self.parser.string_store.get(.{ [_]u8{}, 0 }) catch return error.OutOfMemoryString;
+        res.* = left.concat(self.parser.allocator, right) catch return error.OutOfMemoryString;
+        return res;
     }
 
     /// 数値の減算を実行します。

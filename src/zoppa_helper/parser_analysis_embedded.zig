@@ -2,13 +2,17 @@ const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const String = @import("strings/string.zig").String;
+const Char = @import("strings/char.zig").Char;
 const ArrayList = std.ArrayList;
 const LexicalAnalysis = @import("lexical_analysis.zig");
 const ParserAnalysis = @import("parser_analysis.zig");
 const Iterator = @import("analysis_iterator.zig").AnalysisIterator;
 const Parser = @import("parser_analysis.zig").AnalysisParser;
 const Expression = @import("analysis_expression.zig").AnalysisExpression;
+const Executes = @import("parser_analysis_execute.zig");
 const Errors = @import("analysis_error.zig").AnalysisErrors;
+const isEmbeddedTextEscapeChar = @import("lexical_analysis.zig").isEmbeddedTextEscapeChar;
+const isNoneEmbeddedTextEscapeChar = @import("lexical_analysis.zig").isNoneEmbeddedTextEscapeChar;
 
 /// 埋め込み式の解析を行います。
 /// `parser` は自身のパーサーインスタンスで、`iter` はブロックのイテレータです。
@@ -24,80 +28,158 @@ pub fn embeddedTextParser(parser: *Parser, iter: *Iterator(LexicalAnalysis.Embed
 
         switch (embedded.kind) {
             .None => {
-                exprs.append(try parseTextBlock(parser, embedded, buffer)) catch return error.OutOfMemoryExpression;
+                // 埋め込み式以外は文字列として扱います
+                const text = try unescapeBracket(parser, &embedded.str, buffer, 0, 0, isNoneEmbeddedTextEscapeChar);
+                exprs.append(try Expression.initStringExpression(parser, text)) catch return Errors.OutOfMemoryExpression;
                 _ = iter.next();
             },
             .Unfold => {
-                exprs.append(try parseUnfoldBlock(parser, embedded, buffer)) catch return error.OutOfMemoryExpression;
+                // 展開埋め込み式を解析します
+                const text = try unescapeBracket(parser, &embedded.str, buffer, 2, 1, isEmbeddedTextEscapeChar);
+                exprs.append(try Expression.initUnfoldExpression(parser, text)) catch return Errors.OutOfMemoryExpression;
                 _ = iter.next();
             },
             .NoEscapeUnfold => {
-                exprs.append(try parseNoEscapeUnfoldBlock(parser, embedded, buffer)) catch return error.OutOfMemoryExpression;
+                // 非エスケープ展開埋め込み式を解析します
+                const text = try unescapeBracket(parser, &embedded.str, buffer, 2, 1, isEmbeddedTextEscapeChar);
+                exprs.append(try Expression.initNoEscapeUnfoldExpression(parser, text)) catch return Errors.OutOfMemoryExpression;
+                _ = iter.next();
+            },
+            .Variables => {
+                // 変数埋め込み式を解析します
+                exprs.append(try parseVariablesBlock(parser, embedded, buffer)) catch return Errors.OutOfMemoryExpression;
                 _ = iter.next();
             },
             .IfBlock => {
+                // Ifブロックを解析、最後の埋め込み式が EndIfBlock であることを確認します
                 const expr = try parseIfBlock(parser, iter, buffer);
                 if (iter.hasNext() and iter.peek().?.kind == .EndIfBlock) {
-                    exprs.append(expr) catch return error.OutOfMemoryExpression;
+                    exprs.append(expr) catch return Errors.OutOfMemoryExpression;
                     _ = iter.next();
                 } else {
-                    return error.InvalidExpression;
+                    return Errors.InvalidExpression;
                 }
             },
-            else => {},
+            else => {
+                // サポートされていない埋め込み式の場合はエラーを返す
+                return Errors.UnsupportedEmbeddedExpression;
+            },
         }
     }
-
-    // 解析した式をリストとして返します
-    const list_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
-    const list_exprs = exprs.toOwnedSlice() catch return Errors.OutOfMemoryExpression;
-    list_expr.* = .{ .parser = parser, .data = .{ .ListExpress = .{ .exprs = list_exprs } } };
-    return list_expr;
+    return Expression.initListExpression(parser, &exprs);
 }
 
-/// 埋め込み式以外（テキスト）を解析します。
+/// 入力文字列から波括弧をエスケープ解除します。
+/// `parser` は自身のパーサーインスタンスで、`source` は入力文字列です。
+fn unescapeBracket(
+    parser: *Parser,
+    source: *const String,
+    buffer: *ArrayList(u8),
+    start_skip: comptime_int,
+    last_skip: comptime_int,
+    is_esc_chk: fn (Char) bool,
+) Errors!*String {
+    const is_esc = blk: {
+        var iter = source.iterate();
+        var i: usize = 0;
+        while (iter.hasNext() and i < source.len() - last_skip) {
+            if (iter.next()) |c| {
+                if (i >= start_skip) {
+                    if (c.len == 1 and c.source[0] == '\\') {
+                        if (iter.hasNext() and is_esc_chk(iter.peek().?)) {
+                            break :blk true;
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        break :blk false;
+    };
+
+    if (is_esc) {
+        // エスケープされている場合は、エスケープされた波括弧を取り除く
+        buffer.clearRetainingCapacity();
+
+        var iter = source.iterate();
+        var i: usize = 0;
+        while (iter.hasNext() and i < source.len() - last_skip) {
+            if (iter.next()) |c| {
+                if (i >= start_skip) {
+                    // エスケープ文字かどうかをチェック
+                    const esc = blk: {
+                        if (c.len == 1 and c.source[0] == '\\') {
+                            if (iter.hasNext() and is_esc_chk(iter.peek().?)) {
+                                break :blk true;
+                            }
+                        }
+                        break :blk false;
+                    };
+
+                    // エスケープの有無を確認して文字を追加
+                    // エスケープされている場合は次の文字を追加
+                    if (esc) {
+                        const nc = iter.next().?;
+                        buffer.appendSlice(nc.source[0..nc.len]) catch return Errors.OutOfMemoryString;
+                        i += 1;
+                    } else {
+                        buffer.appendSlice(c.source[0..c.len]) catch return Errors.OutOfMemoryString;
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        return parser.string_store.get(.{ buffer.items, buffer.items.len }) catch return Errors.OutOfMemoryString;
+    } else {
+        // エスケープされていない場合はそのまま文字列を返す
+        const res = parser.string_store.get(.{ [0]u8, 0 }) catch return Errors.OutOfMemoryString;
+        res.* = source.mid(start_skip, source.len() - (start_skip + last_skip));
+        return res;
+    }
+}
+
+/// 変数埋め込み式を解析します。
 /// `parser` は自身のパーサーインスタンスで、`embedded` は埋め込み式のデータです。
-fn parseTextBlock(parser: *Parser, embedded: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) !*Expression {
-    const text_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
-    text_expr.* = .{ .parser = parser, .data = .{ .StringExpress = try unescapeBracket(parser, embedded.str.raw(), buffer, 0, 0) } };
-    return text_expr;
-}
+fn parseVariablesBlock(parser: *Parser, embedded: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) Errors!*Expression {
+    // 式バッファを生成します
+    var exprs = ArrayList(*Expression).init(parser.allocator);
+    defer exprs.deinit();
 
-/// 展開埋め込み式を解析します。
-/// `parser` は自身のパーサーインスタンスで、`embedded` は埋め込み式のデータです。
-fn parseUnfoldBlock(parser: *Parser, embedded: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) !*Expression {
-    const unfold_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
-    unfold_expr.* = .{ .parser = parser, .data = .{ .UnfoldExpress = try unescapeBracket(parser, embedded.str.raw(), buffer, 2, 1) } };
-    return unfold_expr;
-}
+    // 埋め込まれた文字列を取得します
+    const inner_text = try unescapeBracket(
+        parser,
+        &embedded.str,
+        buffer,
+        2,
+        1,
+        isEmbeddedTextEscapeChar,
+    );
 
-/// 展開埋め込み式を解析します（非エスケープ）
-/// `parser` は自身のパーサーインスタンスで、`embedded` は埋め込み式のデータです。
-fn parseNoEscapeUnfoldBlock(parser: *Parser, embedded: LexicalAnalysis.EmbeddedText, buffer: *ArrayList(u8)) !*Expression {
-    const no_unfold_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
-    no_unfold_expr.* = .{ .parser = parser, .data = .{ .NoEscapeUnfoldExpress = try unescapeBracket(parser, embedded.str.raw(), buffer, 2, 1) } };
-    return no_unfold_expr;
-}
+    // 入力文字列を単語に分割します
+    const words = LexicalAnalysis.splitWords(inner_text, parser.allocator) catch return Errors.OutOfMemoryString;
+    defer parser.allocator.free(words);
 
-/// 入力文字列からエスケープされた波括弧を取り除きます。
-/// `parser` は自身のパーサーインスタンスで、`source` は入力の文字列スライスです。
-fn unescapeBracket(parser: *Parser, source: []const u8, buffer: *ArrayList(u8), startSkip: comptime_int, lastSkip: comptime_int) Errors!*String {
-    buffer.clearRetainingCapacity();
-
-    var src_ptr = source.ptr + startSkip;
-    while (@intFromPtr(src_ptr) < @intFromPtr(source.ptr + source.len - lastSkip)) {
-        if (src_ptr[0] == '\\' and @intFromPtr(src_ptr + 1) < @intFromPtr(source.ptr + source.len - lastSkip) and (src_ptr[1] == '{' or src_ptr[1] == '}')) {
-            // エスケープされた波括弧を処理
-            buffer.append(src_ptr[1]) catch return Errors.OutOfMemoryString;
-            src_ptr += 2;
-        } else {
-            buffer.append(src_ptr[0]) catch return Errors.OutOfMemoryString;
-            src_ptr += 1;
+    // 変数式を解析します
+    var iter = Iterator(LexicalAnalysis.Word).init(words);
+    while (iter.hasNext()) {
+        const expr = try Executes.variableParser(parser, &iter, buffer);
+        exprs.append(expr) catch return Errors.OutOfMemoryExpression;
+        if (iter.peek()) |word| {
+            if (word.kind != .Semicolon) return Errors.VariableNotSemicolonSeparated;
+            _ = iter.next(); // セミコロンをスキップ
         }
     }
-    return parser.string_store.get(.{ buffer.items, buffer.items.len }) catch return error.OutOfMemoryString;
+    if (iter.hasNext()) {
+        return Errors.VariableNotSemicolonSeparated;
+    }
+
+    // 変数式をリストとして返します
+    return Expression.initVariableListExpression(parser, &exprs);
 }
 
+/// If埋め込み式を解析します。
+/// `parser` は自身のパーサーインスタンスで、`iter` はブロックのイテレータです。
 fn parseIfBlock(parser: *Parser, iter: *Iterator(LexicalAnalysis.EmbeddedText), buffer: *ArrayList(u8)) Errors!*Expression {
     // 式バッファを生成します
     var exprs = ArrayList(*Expression).init(parser.allocator);
@@ -120,7 +202,15 @@ fn parseIfBlock(parser: *Parser, iter: *Iterator(LexicalAnalysis.EmbeddedText), 
             // else if ブロックを評価
             .ElseIfBlock => {
                 if (lv == 0) {
-                    exprs.append(try parseIfExpression(parser, iter, prev_condition, prev_type, start, end, buffer)) catch return Errors.OutOfMemoryExpression;
+                    exprs.append(try parseIfExpression(
+                        parser,
+                        iter,
+                        prev_condition,
+                        prev_type,
+                        start,
+                        end,
+                        buffer,
+                    )) catch return Errors.OutOfMemoryExpression;
                     prev_condition = blk;
                     prev_type = .ElseIfBlock;
                     update = true;
@@ -130,7 +220,15 @@ fn parseIfBlock(parser: *Parser, iter: *Iterator(LexicalAnalysis.EmbeddedText), 
             // elseブロックを評価
             .ElseBlock => {
                 if (lv == 0) {
-                    exprs.append(try parseIfExpression(parser, iter, prev_condition, prev_type, start, end, buffer)) catch return Errors.OutOfMemoryExpression;
+                    exprs.append(try parseIfExpression(
+                        parser,
+                        iter,
+                        prev_condition,
+                        prev_type,
+                        start,
+                        end,
+                        buffer,
+                    )) catch return Errors.OutOfMemoryExpression;
                     prev_condition = blk;
                     prev_type = .ElseBlock;
                     update = true;
@@ -143,7 +241,15 @@ fn parseIfBlock(parser: *Parser, iter: *Iterator(LexicalAnalysis.EmbeddedText), 
                     lv -= 1;
                 } else {
                     // ネストが終了でループも終了
-                    exprs.append(try parseIfExpression(parser, iter, prev_condition, prev_type, start, end, buffer)) catch return Errors.OutOfMemoryExpression;
+                    exprs.append(try parseIfExpression(
+                        parser,
+                        iter,
+                        prev_condition,
+                        prev_type,
+                        start,
+                        end,
+                        buffer,
+                    )) catch return Errors.OutOfMemoryExpression;
                     break;
                 }
             },
@@ -156,27 +262,30 @@ fn parseIfBlock(parser: *Parser, iter: *Iterator(LexicalAnalysis.EmbeddedText), 
         }
         end = iter.index;
     }
-
-    // if 式を解析
-    const if_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
-    const if_exprs = exprs.toOwnedSlice() catch return Errors.OutOfMemoryExpression;
-    if_expr.* = .{ .parser = parser, .data = .{ .IfExpress = .{ .exprs = if_exprs } } };
-    return if_expr;
+    return Expression.initIfExpression(parser, &exprs);
 }
 
-fn parseIfExpression(parser: *Parser, iter: *Iterator(LexicalAnalysis.EmbeddedText), prev_condition: LexicalAnalysis.EmbeddedText, prev_type: LexicalAnalysis.EmbeddedType, start: usize, end: usize, buffer: *ArrayList(u8)) Errors!*Expression {
-    const tmp_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+/// If埋め込み式の各式を取得します。
+/// `parser` は自身のパーサーインスタンスで、`iter` はブロックのイテレータです。
+fn parseIfExpression(
+    parser: *Parser,
+    iter: *Iterator(LexicalAnalysis.EmbeddedText),
+    prev_condition: LexicalAnalysis.EmbeddedText,
+    prev_type: LexicalAnalysis.EmbeddedType,
+    start: usize,
+    end: usize,
+    buffer: *ArrayList(u8),
+) Errors!*Expression {
     var in_iter = Iterator(LexicalAnalysis.EmbeddedText).init(iter.items[start..end]);
-
     switch (prev_type) {
         .IfBlock, .ElseIfBlock => {
-            const tmp_str = parser.string_store.get(.{ prev_condition.str.raw(), prev_condition.str.raw().len }) catch return Errors.OutOfMemoryString;
-            tmp_expr.* = .{ .parser = parser, .data = .{ .IfConditionExpress = .{ .condition = tmp_str, .inner = try embeddedTextParser(parser, &in_iter, buffer) } } };
+            const tmp_str = parser.string_store.get(.{ [0]u8{}, 0 }) catch return Errors.OutOfMemoryString;
+            tmp_str.* = prev_condition.str;
+            return Expression.initIfConditionExpression(parser, tmp_str, try embeddedTextParser(parser, &in_iter, buffer));
         },
         .ElseBlock => {
-            tmp_expr.* = .{ .parser = parser, .data = .{ .ElseExpress = .{ .inner = try embeddedTextParser(parser, &in_iter, buffer) } } };
+            return Expression.initElseExpression(parser, try embeddedTextParser(parser, &in_iter, buffer));
         },
-        else => return error.InvalidExpression,
+        else => return Errors.ConditionParseFailed,
     }
-    return tmp_expr;
 }
