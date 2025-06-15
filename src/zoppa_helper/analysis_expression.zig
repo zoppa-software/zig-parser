@@ -173,22 +173,22 @@ pub const AnalysisExpression = struct {
                 for (expr.exprs) |e| {
                     const value = try e.get();
                     if (value.String.len() > 0) {
-                        values.appendUnalignedSlice(value.String.raw()) catch return error.OutOfMemoryString;
+                        values.appendUnalignedSlice(value.String.raw()) catch return Errors.OutOfMemoryString;
                     }
                 }
-                const tmp = self.parser.string_store.get(.{ values.items, values.items.len }) catch return error.OutOfMemoryString;
+                const tmp = self.parser.string_store.get(.{ values.items, values.items.len }) catch return Errors.OutOfMemoryString;
                 return .{ .String = tmp };
             },
             .UnfoldExpress => |str| {
-                const expr = self.parser.executes(str) catch return error.EvaluationFailed;
+                const expr = self.parser.executes(str) catch return Errors.EvaluationFailed;
                 return switch (try expr.get()) {
                     .String => |s| .{ .String = s },
                     .Number => |n| {
-                        const msg = std.fmt.allocPrint(self.parser.allocator, "{d}", .{n}) catch return error.OutOfMemoryString;
+                        const msg = std.fmt.allocPrint(self.parser.allocator, "{d}", .{n}) catch return Errors.OutOfMemoryString;
                         defer self.parser.allocator.free(msg);
-                        return .{ .String = self.parser.string_store.get(.{ msg, msg.len }) catch return error.OutOfMemoryString };
+                        return .{ .String = self.parser.string_store.get(.{ msg, msg.len }) catch return Errors.OutOfMemoryString };
                     },
-                    else => return error.EvaluationFailed,
+                    else => return Errors.EvaluationFailed,
                 };
             },
             .NoEscapeUnfoldExpress => |str| .{ .String = str },
@@ -213,7 +213,7 @@ pub const AnalysisExpression = struct {
                         .IfConditionExpress => |con| {
                             const condition = try e.get();
                             if (condition.Boolean) {
-                                return con.inner.get() catch return error.EvaluationFailed;
+                                return con.inner.get() catch return Errors.EvaluationFailed;
                             }
                         },
                         .ElseExpress => {
@@ -225,11 +225,11 @@ pub const AnalysisExpression = struct {
                 return .{ .String = &String.empty };
             },
             .IfConditionExpress => |str| {
-                const expr = self.parser.executes(str.condition) catch return error.EvaluationFailed;
+                const expr = self.parser.executes(str.condition) catch return Errors.EvaluationFailed;
                 const condition = try expr.get();
                 return switch (condition) {
                     .Boolean => condition,
-                    else => return error.EvaluationFailed,
+                    else => return Errors.EvaluationFailed,
                 };
             },
             .ElseExpress => |expr| expr.inner.get(),
@@ -264,17 +264,17 @@ pub const AnalysisExpression = struct {
         return switch (kind) {
             .Plus => switch (value) {
                 .Number => .{ .Number = value.Number },
-                else => error.UnaryOperatorNotSupported,
+                else => Errors.UnaryOperatorNotSupported,
             },
             .Minus => switch (value) {
                 .Number => .{ .Number = -value.Number },
-                else => error.UnaryOperatorNotSupported,
+                else => Errors.UnaryOperatorNotSupported,
             },
             .Not => switch (value) {
                 .Boolean => .{ .Boolean = !value.Boolean },
-                else => error.UnaryOperatorNotSupported,
+                else => Errors.UnaryOperatorNotSupported,
             },
-            else => error.UnaryOperatorNotSupported,
+            else => Errors.UnaryOperatorNotSupported,
         };
     }
 
@@ -298,7 +298,7 @@ pub const AnalysisExpression = struct {
             .LessEqual => lessEqualExpression(leftValue, rightValue),
             .Equal => equalExpression(leftValue, rightValue),
             .NotEqual => notEqualExpression(leftValue, rightValue),
-            else => error.BinaryOperatorNotSupported,
+            else => Errors.BinaryOperatorNotSupported,
         };
     }
 
@@ -311,13 +311,13 @@ pub const AnalysisExpression = struct {
                     const res = @abs(leftValue.Number - rightValue.Number);
                     break :blk .{ .Boolean = leftValue.Number > rightValue.Number and res > std.math.nextAfter(f64, 0, 1) };
                 },
-                else => error.GreaterOperatorNotSupported,
+                else => Errors.GreaterOperatorNotSupported,
             },
             .String => switch (rightValue) {
                 .String => .{ .Boolean = leftValue.String.compare(rightValue.String) == String.Order.greater },
-                else => error.GreaterOperatorNotSupported,
+                else => Errors.GreaterOperatorNotSupported,
             },
-            else => error.GreaterOperatorNotSupported,
+            else => Errors.GreaterOperatorNotSupported,
         };
     }
 
@@ -330,13 +330,13 @@ pub const AnalysisExpression = struct {
                     const res = @abs(leftValue.Number - rightValue.Number);
                     break :blk .{ .Boolean = leftValue.Number > rightValue.Number or res <= std.math.nextAfter(f64, 0, 1) };
                 },
-                else => error.GreaterEqualOperatorNotSupported,
+                else => Errors.GreaterEqualOperatorNotSupported,
             },
             .String => switch (rightValue) {
                 .String => .{ .Boolean = leftValue.String.compare(rightValue.String) != String.Order.less },
-                else => error.GreaterEqualOperatorNotSupported,
+                else => Errors.GreaterEqualOperatorNotSupported,
             },
-            else => error.GreaterEqualOperatorNotSupported,
+            else => Errors.GreaterEqualOperatorNotSupported,
         };
     }
 
@@ -349,13 +349,13 @@ pub const AnalysisExpression = struct {
                     const res = @abs(leftValue.Number - rightValue.Number);
                     break :blk .{ .Boolean = leftValue.Number < rightValue.Number and res > std.math.nextAfter(f64, 0, 1) };
                 },
-                else => error.LessOperatorNotSupported,
+                else => Errors.LessOperatorNotSupported,
             },
             .String => switch (rightValue) {
                 .String => .{ .Boolean = leftValue.String.compare(rightValue.String) == String.Order.less },
-                else => error.LessOperatorNotSupported,
+                else => Errors.LessOperatorNotSupported,
             },
-            else => error.LessOperatorNotSupported,
+            else => Errors.LessOperatorNotSupported,
         };
     }
 
@@ -368,13 +368,13 @@ pub const AnalysisExpression = struct {
                     const res = @abs(leftValue.Number - rightValue.Number);
                     break :blk .{ .Boolean = leftValue.Number < rightValue.Number or res <= std.math.nextAfter(f64, 0, 1) };
                 },
-                else => error.LessEqualOperatorNotSupported,
+                else => Errors.LessEqualOperatorNotSupported,
             },
             .String => switch (rightValue) {
                 .String => .{ .Boolean = leftValue.String.compare(rightValue.String) != String.Order.greater },
-                else => error.LessEqualOperatorNotSupported,
+                else => Errors.LessEqualOperatorNotSupported,
             },
-            else => error.LessEqualOperatorNotSupported,
+            else => Errors.LessEqualOperatorNotSupported,
         };
     }
 
@@ -384,15 +384,15 @@ pub const AnalysisExpression = struct {
         return switch (leftValue) {
             .Number => switch (rightValue) {
                 .Number => .{ .Boolean = @abs(leftValue.Number - rightValue.Number) <= std.math.nextAfter(f64, 0, 1) },
-                else => error.EqualOperatorNotSupported,
+                else => Errors.EqualOperatorNotSupported,
             },
             .String => switch (rightValue) {
                 .String => .{ .Boolean = leftValue.String.compare(rightValue.String) == String.Order.equal },
-                else => error.EqualOperatorNotSupported,
+                else => Errors.EqualOperatorNotSupported,
             },
             .Boolean => switch (rightValue) {
                 .Boolean => .{ .Boolean = leftValue.Boolean == rightValue.Boolean },
-                else => error.EqualOperatorNotSupported,
+                else => Errors.EqualOperatorNotSupported,
             },
         };
     }
@@ -403,15 +403,15 @@ pub const AnalysisExpression = struct {
         return switch (leftValue) {
             .Number => switch (rightValue) {
                 .Number => .{ .Boolean = @abs(leftValue.Number - rightValue.Number) > std.math.nextAfter(f64, 0, 1) },
-                else => error.NotEqualOperatorNotSupported,
+                else => Errors.NotEqualOperatorNotSupported,
             },
             .String => switch (rightValue) {
                 .String => .{ .Boolean = leftValue.String.compare(rightValue.String) != String.Order.equal },
-                else => error.NotEqualOperatorNotSupported,
+                else => Errors.NotEqualOperatorNotSupported,
             },
             .Boolean => switch (rightValue) {
                 .Boolean => .{ .Boolean = leftValue.Boolean != rightValue.Boolean },
-                else => error.NotEqualOperatorNotSupported,
+                else => Errors.NotEqualOperatorNotSupported,
             },
         };
     }
@@ -422,13 +422,13 @@ pub const AnalysisExpression = struct {
         return switch (leftValue) {
             .Number => switch (rightValue) {
                 .Number => .{ .Number = leftValue.Number + rightValue.Number },
-                else => error.CalculationFailed,
+                else => Errors.CalculationFailed,
             },
             .String => switch (rightValue) {
                 .String => .{ .String = try self.concat(leftValue.String, rightValue.String) },
-                else => error.CalculationFailed,
+                else => Errors.CalculationFailed,
             },
-            else => error.CalculationFailed,
+            else => Errors.CalculationFailed,
         };
     }
 
@@ -436,8 +436,8 @@ pub const AnalysisExpression = struct {
     /// `left` と `right` は連結する文字列で、結果の値を返します。
     /// この関数は、2つの文字列を連結し、新しい文字列を生成します。
     fn concat(self: *const AnalysisExpression, left: *const String, right: *const String) Errors!*String {
-        const res = self.parser.string_store.get(.{ [_]u8{}, 0 }) catch return error.OutOfMemoryString;
-        res.* = left.concat(self.parser.allocator, right) catch return error.OutOfMemoryString;
+        const res = self.parser.string_store.get(.{ [_]u8{}, 0 }) catch return Errors.OutOfMemoryString;
+        res.* = left.concat(self.parser.allocator, right) catch return Errors.OutOfMemoryString;
         return res;
     }
 
@@ -447,9 +447,9 @@ pub const AnalysisExpression = struct {
         return switch (leftValue) {
             .Number => switch (rightValue) {
                 .Number => .{ .Number = leftValue.Number - rightValue.Number },
-                else => error.CalculationFailed,
+                else => Errors.CalculationFailed,
             },
-            else => error.CalculationFailed,
+            else => Errors.CalculationFailed,
         };
     }
 
@@ -459,9 +459,9 @@ pub const AnalysisExpression = struct {
         return switch (leftValue) {
             .Number => switch (rightValue) {
                 .Number => .{ .Number = leftValue.Number * rightValue.Number },
-                else => error.CalculationFailed,
+                else => Errors.CalculationFailed,
             },
-            else => error.CalculationFailed,
+            else => Errors.CalculationFailed,
         };
     }
 
@@ -470,10 +470,10 @@ pub const AnalysisExpression = struct {
     pub fn divisionExpression(leftValue: Value, rightValue: Value) Errors!Value {
         return switch (leftValue) {
             .Number => switch (rightValue) {
-                .Number => if (rightValue.Number != 0) .{ .Number = leftValue.Number / rightValue.Number } else error.InvalidExpression,
-                else => error.CalculationFailed,
+                .Number => if (rightValue.Number != 0) .{ .Number = leftValue.Number / rightValue.Number } else Errors.InvalidExpression,
+                else => Errors.CalculationFailed,
             },
-            else => error.CalculationFailed,
+            else => Errors.CalculationFailed,
         };
     }
 
@@ -483,9 +483,9 @@ pub const AnalysisExpression = struct {
         return switch (leftValue) {
             .Boolean => switch (rightValue) {
                 .Boolean => .{ .Boolean = leftValue.Boolean and rightValue.Boolean },
-                else => error.LogicalOperationFailed,
+                else => Errors.LogicalOperationFailed,
             },
-            else => error.LogicalOperationFailed,
+            else => Errors.LogicalOperationFailed,
         };
     }
 
@@ -495,9 +495,9 @@ pub const AnalysisExpression = struct {
         return switch (leftValue) {
             .Boolean => switch (rightValue) {
                 .Boolean => .{ .Boolean = leftValue.Boolean or rightValue.Boolean },
-                else => error.LogicalOperationFailed,
+                else => Errors.LogicalOperationFailed,
             },
-            else => error.LogicalOperationFailed,
+            else => Errors.LogicalOperationFailed,
         };
     }
 
@@ -507,9 +507,9 @@ pub const AnalysisExpression = struct {
         return switch (leftValue) {
             .Boolean => switch (rightValue) {
                 .Boolean => .{ .Boolean = leftValue.Boolean != rightValue.Boolean },
-                else => error.LogicalOperationFailed,
+                else => Errors.LogicalOperationFailed,
             },
-            else => error.LogicalOperationFailed,
+            else => Errors.LogicalOperationFailed,
         };
     }
 };
