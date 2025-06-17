@@ -604,3 +604,12 @@ test "ident test" {
     const ans1 = try expr1.get();
     try testing.expectEqual(9, ans1.Number);
 }
+
+test "array test" {
+    const allocator = std.testing.allocator;
+    var parser = try Parser.init(allocator);
+    defer parser.deinit();
+
+    const inp1 = String.newAllSlice("[1, 2, 3]");
+    _ = try parser.executes(&inp1);
+}

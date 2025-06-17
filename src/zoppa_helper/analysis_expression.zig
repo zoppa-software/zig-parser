@@ -30,6 +30,7 @@ pub const AnalysisExpression = struct {
         NumberExpress: f64,
         StringExpress: *const String,
         BooleanExpress: bool,
+        ArrayExpress: struct { exprs: []*AnalysisExpression },
     },
 
     /// リストの式を初期化します。
@@ -155,6 +156,15 @@ pub const AnalysisExpression = struct {
         return boolean_expr;
     }
 
+    /// 配列の式を初期化します。
+    /// `parser` は解析器のインスタンス、`params` は式のリストです。
+    pub fn initArrayExpression(parser: *Parser, params: *ArrayList(*AnalysisExpression)) Errors!*AnalysisExpression {
+        const array_expr = parser.expr_store.get({}) catch return Errors.OutOfMemoryExpression;
+        const exprs = params.toOwnedSlice() catch return Errors.OutOfMemoryExpression;
+        array_expr.* = .{ .parser = parser, .data = .{ .ArrayExpress = .{ .exprs = exprs } } };
+        return array_expr;
+    }
+
     /// 式をクローンします。
     /// `parser` は解析器のインスタンス、`other` はクローン元の式です。
     pub fn initFromExpression(parser: *Parser, other: *const AnalysisExpression) Errors!*AnalysisExpression {
@@ -240,6 +250,16 @@ pub const AnalysisExpression = struct {
             .NumberExpress => .{ .Number = self.data.NumberExpress },
             .StringExpress => |str| .{ .String = str },
             .BooleanExpress => |bol| .{ .Boolean = bol },
+            .ArrayExpress => |_| {
+                return Errors.OutOfMemoryExpression; // TODO: Implement array expression evaluation
+                //var values = ArrayList(Value).init(self.parser.allocator);
+                //defer values.deinit();
+                //for (expr.exprs) |e| {
+                //    const value = try e.get();
+                //    values.append(value) catch return Errors.OutOfMemoryExpression;
+                //}
+                //return .{ .Array = self.parser.expr_store.get(.{ values.items, values.items.len }) catch return Errors.OutOfMemoryExpression };
+            },
         };
     }
 

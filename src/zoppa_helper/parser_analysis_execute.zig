@@ -146,6 +146,15 @@ fn parseFactor(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *
                 }
                 return expr;
             },
+            .LeftBracket => {
+                const expr = try parseBracket(parser, iter, buffer);
+                if (iter.hasNext() and iter.peek().?.kind == .RightBracket) {
+                    _ = iter.next();
+                } else {
+                    return Errors.InvalidExpression;
+                }
+                return expr;
+            },
             .Number => {
                 _ = iter.next();
                 return Expression.initNumberExpression(parser, try parseNumber(parser, word.str.raw()));
@@ -229,15 +238,44 @@ fn parseStringLiteral(parser: *Parser, source: []const u8, buffer: *ArrayList(u8
 /// この関数は、左括弧が見つかった場合に括弧内の式を解析し、結果の `Expression` を返します。
 /// もし左括弧が見つからなかった場合は、論理式の解析を行います。
 fn parseParen(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) Errors!*Expression {
-    if (iter.peek()) |word| {
-        if (word.kind == .LeftParen) {
-            _ = iter.next();
-            return try parenBlockParser(parser, .LeftParen, .RightParen, iter, buffer);
-        } else {
-            return try logicalParser(parser, iter, buffer);
+    _ = iter.next();
+    const range = parenBlockParser(.LeftParen, .RightParen, iter);
+    var in_iter = Iterator((LexicalAnalysis.Word)).init(iter.items[range.start..range.end]);
+    const in_expr = try ternaryOperatorParser(parser, &in_iter, buffer);
+    return Expression.initParenExpression(parser, in_expr);
+}
+
+/// 括弧で囲まれたブロックを解析します。
+/// `parser` は自身のパーサーインスタンスで、`iter` は単語のイテレータです。
+/// この関数は、左括弧が見つかった場合に括弧内のブロックを解析し、結果の `Expression` を返します。
+/// もし左括弧が見つからなかった場合は、論理式の解析を行います。
+fn parseBracket(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *ArrayList(u8)) Errors!*Expression {
+    _ = iter.next();
+    const range = parenBlockParser(.LeftBracket, .RightBracket, iter);
+    var in_iter = Iterator((LexicalAnalysis.Word)).init(iter.items[range.start..range.end]);
+
+    var exprs = ArrayList(*Expression).init(parser.allocator);
+    defer exprs.deinit();
+    while (in_iter.hasNext()) {
+        const in_expr = try ternaryOperatorParser(parser, &in_iter, buffer);
+        exprs.append(in_expr) catch return Errors.OutOfMemoryExpression;
+
+        if (in_iter.hasNext()) {
+            switch (in_iter.peek().?.kind) {
+                .Comma => {
+                    _ = in_iter.next(); // カンマをスキップ
+                },
+                .RightBracket => {
+                    // 右括弧が見つかった場合、ループを終了
+                    break;
+                },
+                else => {
+                    return Errors.InvalidExpression; // 無効な式
+                },
+            }
         }
     }
-    return Errors.InvalidExpression;
+    return Expression.initArrayExpression(parser, &exprs);
 }
 
 /// 括弧で囲まれたブロックを解析します。
@@ -245,12 +283,10 @@ fn parseParen(parser: *Parser, iter: *Iterator(LexicalAnalysis.Word), buffer: *A
 /// `next_parser` は、括弧内の式を解析するための次のパーサー関数です。
 /// この関数は、括弧内の式を解析し、結果の `Expression` を返します。
 fn parenBlockParser(
-    parser: *Parser,
     comptime LParen: LexicalAnalysis.WordType,
     comptime RParen: LexicalAnalysis.WordType,
     iter: *Iterator(LexicalAnalysis.Word),
-    buffer: *ArrayList(u8),
-) Errors!*Expression {
+) struct { start: usize, end: usize } {
     const start = iter.index;
     var end: usize = iter.index;
     var lv: u8 = 0;
@@ -274,9 +310,5 @@ fn parenBlockParser(
         _ = iter.next();
         end = iter.index;
     }
-
-    // 括弧内の式を解析
-    var in_iter = Iterator((LexicalAnalysis.Word)).init(iter.items[start..end]);
-    const in_expr = try logicalParser(parser, &in_iter, buffer);
-    return Expression.initParenExpression(parser, in_expr);
+    return .{ .start = start, .end = end };
 }

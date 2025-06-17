@@ -55,15 +55,10 @@ pub const AnalysisParser = struct {
     /// 式の破棄関数
     fn deinitExpression(alloc: Allocator, expr: *Expression) void {
         switch (expr.data) {
-            .ListExpress => |list_expr| {
-                alloc.free(list_expr.exprs);
-            },
-            .VariableListExpress => |vlist_expr| {
-                alloc.free(vlist_expr.exprs);
-            },
-            .IfExpress => |if_expr| {
-                alloc.free(if_expr.exprs);
-            },
+            .ListExpress => |list_expr| alloc.free(list_expr.exprs),
+            .VariableListExpress => |vlist_expr| alloc.free(vlist_expr.exprs),
+            .IfExpress => |if_expr| alloc.free(if_expr.exprs),
+            .ArrayExpress => |array_expr| alloc.free(array_expr.exprs),
             else => {},
         }
     }
