@@ -631,12 +631,12 @@ pub fn BTree(comptime T: type, comptime M: comptime_int, comptime compare: fn (l
         /// イテレータを使用して、B木コレクションの要素を反復処理します。
         /// イテレータは、B木コレクションの要素を順番に処理するための構造体です。
         pub fn iterate(self: *Self) !Iterator {
-            const depth: usize = @intFromFloat(@ceil(@log(@as(f64, @floatFromInt(self.count))) / @log(@as(f64, @floatFromInt(M * 2)))));
+            const depth: usize = if (self.count > 0) @intFromFloat(@ceil(@log(@as(f64, @floatFromInt(self.count))) / @log(@as(f64, @floatFromInt(M * 2))))) else 0;
             var res = Iterator{
                 .tree = self,
                 .depth = 0,
-                .hierarchy = try self.allocator.alloc(?*Node, depth + 1),
-                .index = try self.allocator.alloc(usize, depth + 1),
+                .hierarchy = try self.allocator.alloc(?*Node, depth + 2),
+                .index = try self.allocator.alloc(usize, depth + 2),
             };
             res.hierarchy[res.depth] = self.root;
             res.index[res.depth] = 0;

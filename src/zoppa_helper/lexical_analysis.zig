@@ -21,7 +21,7 @@ pub const WordType = enum {
     Plus, // プラス
     Minus, // マイナス
     Multiply, // アスタリスク
-    Devision, // スラッシュ
+    Divide, // スラッシュ
     LeftParen, // 左括弧
     RightParen, // 右括弧
     LeftBracket, // 左ブラケット
@@ -71,7 +71,7 @@ pub const EmbeddedText = struct {
 /// 文字列をトークンに分割します。
 /// 入力文字列を解析して、単語のリストを生成します。
 /// 各単語はWord構造体で表され、文字列とその種類を持ちます。
-pub fn splitWords(input: *const String, allocator: Allocator) ![]Word {
+pub fn splitWords(allocator: Allocator, input: *const String) LexicalError![]Word {
     // トークンを格納するためのArrayListを初期化します。
     var tokens = ArrayList(Word).init(allocator);
     defer tokens.deinit();
@@ -84,20 +84,23 @@ pub fn splitWords(input: *const String, allocator: Allocator) ![]Word {
     while (iter.hasNext()) {
         const pc = iter.peek();
         if (pc) |c| {
-            if (c.isWhiteSpace() or c.len > 1) {
-                // 空白文字またはマルチバイト文字が見つかった場合は次へ
+            if (c.isWhiteSpace()) {
+                // 空白文字が見つかった場合は次へ
                 _ = iter.next();
-            } else {
+            } else if (c.len == 1) {
                 // 1文字の場合はトークン解析します
                 const word = switchOneCharToWord(&split_char, input, &iter, c) catch {
                     return LexicalError.WordAnalysisError;
                 };
-                try tokens.append(word);
+                tokens.append(word) catch return LexicalError.OutOfMemoryWord;
+            } else {
+                // それ以外の文字列はキーワードまたは識別子とみなす
+                const word = getWordString(&split_char, input, &iter);
+                tokens.append(word) catch return LexicalError.OutOfMemoryWord;
             }
         }
     }
-
-    return tokens.toOwnedSlice();
+    return tokens.toOwnedSlice() catch return LexicalError.OutOfMemoryWord;
 }
 
 /// 分割文字を定義します。
@@ -140,7 +143,7 @@ fn createSplitChar() [256]bool {
 /// 文字が演算子や記号の場合は、対応するWordTypeを設定します。
 /// 文字が数字の場合は、数字のトークンを作成します。
 /// 文字が文字列リテラルの場合は、文字列リテラルのトークンを作成します。
-fn switchOneCharToWord(split_char: *const [256]bool, input: *const String, iter: *String.Iterator, c: Char) !Word {
+fn switchOneCharToWord(split_char: *const [256]bool, input: *const String, iter: *String.Iterator, c: Char) LexicalError!Word {
     return switch (c.source[0]) {
         '\\' => .{ .str = getOneCharString(input, iter), .kind = WordType.Backslash },
         '.' => .{ .str = getOneCharString(input, iter), .kind = WordType.Period },
@@ -150,7 +153,7 @@ fn switchOneCharToWord(split_char: *const [256]bool, input: *const String, iter:
         '+' => .{ .str = getOneCharString(input, iter), .kind = WordType.Plus },
         '-' => .{ .str = getOneCharString(input, iter), .kind = WordType.Minus },
         '*' => .{ .str = getOneCharString(input, iter), .kind = WordType.Multiply },
-        '/' => .{ .str = getOneCharString(input, iter), .kind = WordType.Devision },
+        '/' => .{ .str = getOneCharString(input, iter), .kind = WordType.Divide },
         '(' => .{ .str = getOneCharString(input, iter), .kind = WordType.LeftParen },
         ')' => .{ .str = getOneCharString(input, iter), .kind = WordType.RightParen },
         '[' => .{ .str = getOneCharString(input, iter), .kind = WordType.LeftBracket },
@@ -265,7 +268,7 @@ fn getWordString(split_char: *const [256]bool, input: *const String, iter: *Stri
     while (iter.hasNext()) {
         const pc = iter.peek();
         if (pc) |c| {
-            if (c.isWhiteSpace() or c.len > 1 or split_char[c.source[0]]) {
+            if (c.isWhiteSpace() or split_char[c.source[0]]) {
                 // 空白文字または分割文字が見つかったら終了
                 break;
             }
@@ -300,18 +303,9 @@ inline fn isKeyword(input: *const String, wordchar: []const u8) bool {
     return input.raw()[0] == wordchar[0] and input.eqlLiteral(wordchar);
 }
 
-/// キーワードを取得します。
-/// キーワードは、識別子の一種であり、特定の意味を持つ単語です。
-inline fn getKeyword(input: *const String, wordType: WordType) Word {
-    return .{
-        .str = input.*,
-        .kind = wordType,
-    };
-}
-
 /// 文字列リテラルを取得します。
 /// 文字列リテラルは、引用符　' または " で囲まれた文字列です。
-fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *String.Iterator) !String {
+pub fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *String.Iterator) LexicalError!String {
     const start = iter.current_index;
     _ = iter.next();
     var closed = false;
@@ -319,10 +313,7 @@ fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *S
     while (iter.hasNext()) {
         const pc = iter.next();
         if (pc) |c| {
-            if (c.len == 1 and c.source[0] == '\\' and
-                iter.peek() != null and iter.peek().?.len == 1 and
-                (iter.peek().?.source[0] == quote or iter.peek().?.source[0] == 't' or iter.peek().?.source[0] == 'n'))
-            {
+            if (c.len == 1 and c.source[0] == '\\' and iter.peek() != null) {
                 // エスケープ文字が見つかった場合は次の文字を無視
                 _ = iter.next();
             } else if (c.len == 1 and c.source[0] == quote and
@@ -350,7 +341,7 @@ fn getStringLiteral(comptime quote: comptime_int, input: *const String, iter: *S
 /// 数字は整数または小数点を含むことができます。
 /// 符号（+/-）も許可されます。
 /// 例: "123", "-456.78", "+3.14" など。
-fn getNumberToken(input: *const String, iter: *String.Iterator) !String {
+pub fn getNumberToken(input: *const String, iter: *String.Iterator) LexicalError!String {
     const start = iter.current_index;
     var dec = false;
     var num = false;
@@ -399,7 +390,7 @@ fn getNumberToken(input: *const String, iter: *String.Iterator) !String {
 
 /// 文字列を埋め込み式、埋め込み式以外に分割します。
 /// 入力文字列を解析して、ブロックのリストを生成します。
-pub fn splitEmbeddedText(input: *const String, allocator: Allocator) ![]EmbeddedText {
+pub fn splitEmbeddedText(allocator: Allocator, input: *const String) LexicalError![]EmbeddedText {
     var tokens = ArrayList(EmbeddedText).init(allocator);
     defer tokens.deinit();
 
@@ -414,15 +405,15 @@ pub fn splitEmbeddedText(input: *const String, allocator: Allocator) ![]Embedded
                 '$' => try getVariablesBlock(input, &iter),
                 else => EmbeddedText{ .str = getTextBlock(input, &iter), .kind = EmbeddedType.None },
             };
-            try tokens.append(word);
+            tokens.append(word) catch return LexicalError.OutOfMemoryEmbeddedText;
         }
     }
-    return tokens.toOwnedSlice();
+    return tokens.toOwnedSlice() catch return LexicalError.OutOfMemoryEmbeddedText;
 }
 
 /// 埋め込み式を取得します。
 /// 埋め込み式は、{ で始まり、} で終わる文字列です。
-fn getCommandBlock(input: *const String, iter: *String.Iterator) !EmbeddedText {
+fn getCommandBlock(input: *const String, iter: *String.Iterator) LexicalError!EmbeddedText {
     const cmd = try getCommandBlockString(input, iter, false);
     if (cmd.startWithLiteral("{if") and cmd.at(3).?.isWhiteSpace()) {
         return .{ .str = cmd.mid(4, cmd.len() - 5), .kind = EmbeddedType.IfBlock };
@@ -443,7 +434,7 @@ fn getCommandBlock(input: *const String, iter: *String.Iterator) !EmbeddedText {
 
 /// 展開埋め込み式を取得します。
 /// 展開埋め込み式は、# または ! で始まり、{ で終わる文字列です。
-fn getUnfoldBlock(input: *const String, iter: *String.Iterator, blkType: EmbeddedType) !EmbeddedText {
+fn getUnfoldBlock(input: *const String, iter: *String.Iterator, blkType: EmbeddedType) LexicalError!EmbeddedText {
     if (iter.skip(1)) |lc| {
         if (lc.len == 1) {
             if (lc.source[0] != '{') {
@@ -458,7 +449,7 @@ fn getUnfoldBlock(input: *const String, iter: *String.Iterator, blkType: Embedde
 
 /// 変数埋め込み式を取得します。
 /// 変数埋め込み式は、$ で始まり、{ で終わる文字列です。
-fn getVariablesBlock(input: *const String, iter: *String.Iterator) !EmbeddedText {
+fn getVariablesBlock(input: *const String, iter: *String.Iterator) LexicalError!EmbeddedText {
     if (iter.skip(1)) |lc| {
         if (lc.len == 1) {
             if (lc.source[0] != '{') {
@@ -473,7 +464,7 @@ fn getVariablesBlock(input: *const String, iter: *String.Iterator) !EmbeddedText
 
 /// コマンド埋め込み式内の文字列を取得します。
 /// コマンド埋め込み式は、{ で始まり、} で終わる文字列です。
-fn getCommandBlockString(input: *const String, iter: *String.Iterator, isEmbeddedText: bool) !String {
+fn getCommandBlockString(input: *const String, iter: *String.Iterator, isEmbeddedText: bool) LexicalError!String {
     const start = iter.current_index;
     var closed = false;
 
@@ -496,9 +487,8 @@ fn getCommandBlockString(input: *const String, iter: *String.Iterator, isEmbedde
 
                 // エスケープ文字が見つかった場合は次の文字を無視
                 '\\' => {
-                    const nc = iter.peek();
-                    if (nc) |next_c| {
-                        if (next_c.len == 1 and isEmbeddedTextEscapeChar(next_c)) {
+                    if (iter.peek()) |nc| {
+                        if (nc.len == 1 and (nc.source[0] == '{' or nc.source[0] == '}')) {
                             // エスケープされた { または } を無視
                             _ = iter.next();
                         }
@@ -530,7 +520,7 @@ fn getTextBlock(input: *const String, iter: *String.Iterator) String {
                     break;
                 },
 
-                // #,!,$ が見つかったらテキスト部の終了
+                // #{, !{, ${ が見つかったらテキスト部の終了
                 '#', '!', '$' => {
                     const nc = iter.skip(1);
                     if (nc) |next_c| {
@@ -542,11 +532,15 @@ fn getTextBlock(input: *const String, iter: *String.Iterator) String {
 
                 // エスケープ文字が見つかった場合は次の文字を無視
                 '\\' => {
-                    const nc = iter.skip(1);
-                    if (nc) |next_c| {
-                        if (next_c.len == 1 and isNoneEmbeddedTextEscapeChar(next_c)) {
-                            // エスケープされた文字を無視
+                    if (iter.skip(1)) |nc1| {
+                        if (nc1.len == 1 and (nc1.source[0] == '{' or nc1.source[0] == '}')) {
                             _ = iter.next();
+                        }
+                        if (iter.skip(2)) |nc2| {
+                            if (nc1.len == 1 and (nc1.source[0] == '#' or nc1.source[0] == '!' or nc1.source[0] == '$') and nc2.len == 1 and nc2.source[0] == '{') {
+                                _ = iter.next();
+                                _ = iter.next();
+                            }
                         }
                     }
                 },
@@ -568,64 +562,4 @@ pub fn isEmbeddedTextEscapeChar(input: Char) bool {
 /// 埋め込み式以外のエスケープ文字は、{, }, #, !, $ です。
 pub fn isNoneEmbeddedTextEscapeChar(input: Char) bool {
     return input.source[0] == '{' or input.source[0] == '}' or input.source[0] == '#' or input.source[0] == '!' or input.source[0] == '$';
-}
-
-test "getStringLiteral test" {
-    const input1 = String.newAllSlice("\"Hello, World!\"");
-    var iter1 = input1.iterate();
-    var token1 = try getStringLiteral('"', &input1, &iter1);
-    try std.testing.expectEqualSlices(u8, "\"Hello, World!\"", token1.raw());
-
-    const input2 = String.newAllSlice("'This is a test.'");
-    var iter2 = input2.iterate();
-    var token2 = try getStringLiteral('\'', &input2, &iter2);
-    try std.testing.expectEqualSlices(u8, "'This is a test.'", token2.raw());
-
-    const input3 = String.newAllSlice("\"Another test with \\\"escaped quotes\\\".\"");
-    var iter3 = input3.iterate();
-    var token3 = try getStringLiteral('\"', &input3, &iter3);
-    try std.testing.expectEqualSlices(u8, "\"Another test with \\\"escaped quotes\\\".\"", token3.raw());
-
-    const input4 = String.newAllSlice("'Unclosed string literal");
-    var iter4 = input4.iterate();
-    if (getStringLiteral('\'', &input4, &iter4)) |_| {
-        unreachable; // ここに到達してはならない
-    } else |err| {
-        try std.testing.expectEqual(LexicalError.UnclosedStringLiteralError, err);
-    }
-}
-
-test "getNumberToken test" {
-    const input = String.newAllSlice("123 -456.78 +3.14 123_456_789 4..2 4__5");
-    defer input.deinit();
-
-    var iter = input.iterate();
-
-    var token = try getNumberToken(&input, &iter);
-    try std.testing.expectEqualSlices(u8, "123", token.raw());
-    _ = iter.next();
-
-    token = try getNumberToken(&input, &iter);
-    try std.testing.expectEqualSlices(u8, "-456.78", token.raw());
-    _ = iter.next();
-
-    token = try getNumberToken(&input, &iter);
-    try std.testing.expectEqualSlices(u8, "+3.14", token.raw());
-    _ = iter.next();
-
-    token = try getNumberToken(&input, &iter);
-    try std.testing.expectEqualSlices(u8, "123_456_789", token.raw());
-    _ = iter.next();
-
-    token = try getNumberToken(&input, &iter);
-    try std.testing.expectEqualSlices(u8, "4.", token.raw());
-    _ = iter.next();
-    _ = iter.next();
-    _ = iter.next();
-
-    if (getNumberToken(&input, &iter)) |_| {
-        unreachable;
-    } else |err| {
-        try std.testing.expectEqual(LexicalError.ConsecutiveUnderscoreError, err);
-    }
 }

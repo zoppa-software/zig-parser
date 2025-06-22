@@ -1,166 +1,194 @@
+///! parser_analysis.zig
+///! 式解析を行うモジュール
+///! このモジュールは、文字列から式を解析し、結果を `ParseAnswer` として返します。
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const String = @import("strings/string.zig").String;
-const LexicalAnalysis = @import("lexical_analysis.zig");
-const ArrayList = std.ArrayList;
-const Store = @import("stores/store.zig").Store;
-const Expression = @import("analysis_expression.zig").AnalysisExpression;
+const Lexical = @import("lexical_analysis.zig");
 const Iterator = @import("analysis_iterator.zig").AnalysisIterator;
+const VariableEnv = @import("variable_environment.zig").VariableEnvironment;
 const ParserError = @import("analysis_error.zig").ParserError;
-const Executes = @import("parser_analysis_execute.zig");
-const Embedded = @import("parser_analysis_embedded.zig");
-const Variables = @import("analysis_variables.zig").AnalysisVariableHierarchy;
+const Errors = @import("analysis_error.zig").AnalysisErrors;
+const VariableError = @import("analysis_error.zig").VariableError;
+const ExpressionStore = @import("analysis_expression.zig").ExpressionStore;
+const Expression = @import("analysis_expression.zig").AnalysisExpression;
+const Executes = @import("parser_execute.zig");
+const Embedded = @import("parser_embedded.zig");
+const Value = @import("analisys_value.zig").AnalysisValue;
 
-/// 構文解析器のモジュール。
-/// このモジュールは、文字列を解析して式を生成するための機能を提供します。
-/// 式は、加算、減算、乗算、除算などの基本的な数学演算をサポートします。
-/// 式は、単項演算子（プラス、マイナス、否定）と二項演算子（加算、減算、乗算、除算）を含むことができます。
-/// このモジュールは、式の解析と評価を行うための `Parser` 構造体を提供します。
-pub const AnalysisParser = struct {
-    /// 自身の型
-    const Self = @This();
-
-    // アロケータ
+/// 解析結果の構造体
+/// 解析された式の結果を格納するための構造体です。
+pub const ParseAnswer = struct {
+    /// アロケータ
     allocator: Allocator,
 
-    // 式のストア
-    expr_store: Store(Expression, 32, initExpression, deinitExpression),
+    /// 入力文字列
+    input: String,
 
-    // 文字列のストア
-    string_store: Store(String, 32, initString, deinitString),
+    /// 式のストア
+    expr_store: ExpressionStore,
 
-    // 変数階層
-    variables: Variables,
+    /// ルートの式
+    root_expr: *const Expression,
 
-    /// パーサーを初期化します。
-    pub fn init(alloc: Allocator) !Self {
-        return Self{
-            .allocator = alloc,
-            .expr_store = try Store(Expression, 32, initExpression, deinitExpression).init(alloc),
-            .string_store = try Store(String, 32, initString, deinitString).init(alloc),
-            .variables = try Variables.init(alloc),
+    /// 取得した値
+    value: Value,
+
+    /// 解析結果の初期化を行います。
+    /// この関数は、アロケータ、入力文字列、式ストア、ルートの式を受け取り、解析結果の構造体を初期化します。
+    pub fn init(allocator: Allocator, input: String, expr_store: ExpressionStore, root_expr: *const Expression) ParseAnswer {
+        return ParseAnswer{
+            .allocator = allocator,
+            .input = input,
+            .expr_store = expr_store,
+            .root_expr = root_expr,
+            .value = Value{ .Number = 0 },
         };
     }
 
-    /// パーサーを破棄します。
-    pub fn deinit(self: *Self) void {
+    /// 解析結果を解放します。
+    pub fn deinit(self: *ParseAnswer) void {
+        self.input.deinit();
         self.expr_store.deinit();
-        self.string_store.deinit();
-        self.variables.deinit();
+        self.value.deinit(self.allocator);
     }
 
-    /// 式の初期化関数
-    fn initExpression(_: Allocator, _: *Expression, _: anytype) !void {}
+    /// 変数環境を使用して、ルートの式を評価し、値を取得します。
+    pub fn get(self: *ParseAnswer, variables: *VariableEnv) Errors!Value {
+        self.value.deinit(self.allocator);
 
-    /// 式の破棄関数
-    fn deinitExpression(alloc: Allocator, expr: *Expression) void {
-        switch (expr.data) {
-            .ListExpress => |list_expr| alloc.free(list_expr.exprs),
-            .VariableListExpress => |vlist_expr| alloc.free(vlist_expr.exprs),
-            .IfExpress => |if_expr| alloc.free(if_expr.exprs),
-            .ArrayExpress => |array_expr| alloc.free(array_expr.exprs),
-            else => {},
-        }
-    }
+        // 変数環境をクローンして、階層を追加します
+        // これにより、元の変数環境を変更せずに評価が可能になります
+        var cloned_env = variables.clone() catch return VariableError.OutOfMemoryVariables;
+        defer cloned_env.deinit();
+        cloned_env.addHierarchy() catch return VariableError.OutOfMemoryVariables;
+        defer cloned_env.removeHierarchy();
 
-    /// 文字列の初期化関数
-    fn initString(alloc: Allocator, str: *String, args: anytype) !void {
-        if (args[1] > 0) {
-            str.* = String.newString(alloc, args[0][0..args[1]]) catch return ParserError.OutOfMemoryString;
-        }
-    }
-
-    /// 文字列の破棄関数
-    fn deinitString(_: Allocator, str: *String) void {
-        str.deinit();
-    }
-
-    /// 式を解析して実行する関数。
-    /// 入力は文字列のポインタで、アロケータを使用してメモリを管理します。
-    /// この関数は、式を解析し、結果の `Expression` を返します。
-    pub fn executes(self: *Self, input: *const String) !*Expression {
-        // 入力文字列を単語に分割します
-        const words = try LexicalAnalysis.splitWords(input, self.allocator);
-        defer self.allocator.free(words);
-
-        // 単語のイテレータを作成します
-        var iter = Iterator(LexicalAnalysis.Word).init(words);
-
-        // 文字列バッファを生成します
-        var buffer = ArrayList(u8).init(self.allocator);
-        defer buffer.deinit();
-
-        return blk: {
-            // 解析を開始します
-            const res = try Executes.ternaryOperatorParser(self, &iter, &buffer);
-
-            // 残っている単語がある場合は、無効な式とみなします
-            if (iter.hasNext()) {
-                return error.InvalidExpression;
-            }
-            break :blk res;
-        };
-    }
-
-    /// 文章を翻訳します。
-    /// この関数は、入力の文字列を解析し、結果の `String` を返します。
-    pub fn translate(self: *Self, input: *const String) !*Expression {
-        // 入力文字列をブロックに分割します
-        const embeddeds = try LexicalAnalysis.splitEmbeddedText(input, self.allocator);
-        defer self.allocator.free(embeddeds);
-
-        // 単語のイテレータを作成します
-        var iter = Iterator(LexicalAnalysis.EmbeddedText).init(embeddeds);
-
-        // 文字列バッファを生成します
-        var buffer = ArrayList(u8).init(self.allocator);
-        defer buffer.deinit();
-
-        return blk: {
-            // 解析を開始します
-            const res = try Embedded.embeddedTextParser(self, &iter, &buffer);
-
-            // 残っている単語がある場合は、無効な式とみなします
-            if (iter.hasNext()) {
-                return error.InvalidExpression;
-            }
-            break :blk res;
-        };
-    }
-
-    /// 数値変数を設定します。
-    pub fn setNumberVariable(self: *Self, name: *const String, number: f64) !void {
-        // 数値式を生成し、変数を登録します
-        const expr = try Expression.initNumberExpression(self, number);
-        try self.variables.regist(name, expr);
-    }
-
-    /// 文字列変数を設定します。
-    pub fn setStringVariable(self: *Self, name: *const String, str: *const String) !void {
-        // 数値式を生成し、変数を登録します
-        const expr = try Expression.initStringExpression(self, str);
-        try self.variables.regist(name, expr);
-    }
-
-    /// 真偽値変数を設定します。
-    pub fn setBooleanVariable(self: *Self, name: *const String, value: bool) !void {
-        // 真偽値式を生成、変数を登録します
-        const expr = try Expression.initBooleanExpression(self, value);
-        try self.variables.regist(name, expr);
-    }
-
-    /// 変数を取得します。
-    pub fn getVariableExpression(self: *Self, name: *const String) !*const Expression {
-        return self.variables.getExpr(name);
-    }
-
-    /// 変数群を階層にプッシュします。
-    pub fn pushVariable(self: *Self) !void {
-        try self.variables.addHierarchy();
-    }
-
-    /// 変数群を階層からポップします。
-    pub fn popVariable(self: *Self) !void {
-        try self.variables.removeHierarchy();
+        // ルートの式を評価して値を取得します
+        self.value = try self.root_expr.get(self.allocator, &cloned_env);
+        return self.value;
     }
 };
+
+/// リテラル文字列から式解析を実行します。
+/// この関数は、リテラル文字列を受け取り、式解析を実行します。
+/// 解析結果は `ParseAnswer` として返されます。
+pub fn executesFromLiteral(allocator: Allocator, input: []const u8) Errors!ParseAnswer {
+    const input_str = String.newString(allocator, input) catch return ParserError.OutOfMemoryString;
+    return innerExecutes(allocator, input_str);
+}
+
+/// 文字列から式解析を実行します。
+/// この関数は、文字列を受け取り、式解析を実行します。
+/// 解析結果は `ParseAnswer` として返されます。
+pub fn executes(allocator: Allocator, input: *const String) Errors!ParseAnswer {
+    const input_str = String.newString(allocator, input.raw()) catch return ParserError.OutOfMemoryString;
+    return innerExecutes(allocator, input_str);
+}
+
+/// 文字列から式解析を実行します（内部用）
+fn innerExecutes(allocator: Allocator, input: String) Errors!ParseAnswer {
+    // 入力文字列を単語に分割します
+    const words = Lexical.splitWords(allocator, &input) catch |err| {
+        input.deinit();
+        return err;
+    };
+    defer allocator.free(words);
+
+    // 単語のイテレーターを作成します
+    var iter = Iterator(Lexical.Word).init(words);
+
+    // 式の解析を実行します
+    var expr_store: ExpressionStore = ExpressionStore.init(allocator) catch return ParserError.OutOfMemoryExpression;
+    const expr = Executes.ternaryOperatorParser(allocator, &expr_store, &iter) catch |err| {
+        input.deinit();
+        expr_store.deinit();
+        return err;
+    };
+
+    // 残っている単語がある場合は、無効な式とみなします
+    if (iter.hasNext()) {
+        input.deinit();
+        expr_store.deinit();
+        return ParserError.InvalidExpression;
+    }
+
+    // 解析結果を返します
+    return ParseAnswer.init(allocator, input, expr_store, expr);
+}
+
+/// 文字列から式解析を実行します（内部用）
+pub fn directExecutes(allocator: Allocator, expr_store: *ExpressionStore, input: *const String) ParserError!*Expression {
+    // 入力文字列を単語に分割します
+    const words = Lexical.splitWords(allocator, input) catch return ParserError.OutOfMemoryString;
+    defer allocator.free(words);
+
+    // 単語のイテレーターを作成します
+    var iter = Iterator(Lexical.Word).init(words);
+
+    return Executes.ternaryOperatorParser(allocator, expr_store, &iter);
+}
+
+/// リテラル文字列から埋め込み式解析を行います。
+/// この関数は、リテラル文字列を受け取り、埋め込み式解析を行います。
+/// 解析結果は `ParseAnswer` として返されます。
+pub fn translateFromLiteral(allocator: Allocator, input: []const u8) Errors!ParseAnswer {
+    const input_str = String.newString(allocator, input) catch return ParserError.OutOfMemoryString;
+    return innerTranslate(allocator, input_str);
+}
+
+/// 文字列から埋め込み式解析を行います。
+/// この関数は、文字列を受け取り、埋め込み式解析を行います。
+/// 解析結果は `ParseAnswer` として返されます。
+pub fn translate(allocator: Allocator, input: *const String) Errors!ParseAnswer {
+    const input_str = String.newString(allocator, input.raw()) catch return ParserError.OutOfMemoryString;
+    return innerTranslate(allocator, input_str);
+}
+
+/// 文字列から埋め込み式解析を行います（内部用）
+/// この関数は、文字列を受け取り、埋め込み式解析を行います。
+/// 解析結果は `ParseAnswer` として返されます。
+fn innerTranslate(allocator: Allocator, input: String) Errors!ParseAnswer {
+    // 入力文字列を埋め込み式、非埋め込み式に分割します
+    const embeddeds = Lexical.splitEmbeddedText(allocator, &input) catch |err| {
+        input.deinit();
+        return err;
+    };
+    defer allocator.free(embeddeds);
+
+    // 埋め込み式のイテレーターを作成します
+    var iter = Iterator(Lexical.EmbeddedText).init(embeddeds);
+
+    // 式の解析を実行します
+    var expr_store: ExpressionStore = ExpressionStore.init(allocator) catch return ParserError.OutOfMemoryExpression;
+    const expr = Embedded.embeddedTextParser(allocator, &expr_store, &iter) catch |err| {
+        input.deinit();
+        expr_store.deinit();
+        return err;
+    };
+
+    // 残っている単語がある場合は、無効な式とみなします
+    if (iter.hasNext()) {
+        input.deinit();
+        expr_store.deinit();
+        return ParserError.InvalidExpression;
+    }
+
+    // 解析結果を返します
+    return ParseAnswer.init(allocator, input, expr_store, expr);
+}
+
+test "executesFromLiteral test" {
+    const allocator = std.testing.allocator;
+    var result = try executesFromLiteral(allocator, "x + y - z");
+    defer result.deinit();
+}
+
+test "executes test" {
+    const allocator = std.testing.allocator;
+    const input_str = String.newAllSlice("a * b + c");
+    defer input_str.deinit();
+
+    var result = try executes(allocator, &input_str);
+    defer result.deinit();
+}

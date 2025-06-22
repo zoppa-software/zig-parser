@@ -1,3 +1,5 @@
+///! AnalysisIterator.zig
+///! パースや解析のための単語やブロックのイテレータを提供します。
 const std = @import("std");
 const testing = std.testing;
 
@@ -39,7 +41,7 @@ pub fn AnalysisIterator(comptime T: type) type {
     };
 }
 
-test "AnalysisIterator" {
+test "イテレーターループテスト" {
     var values: [5]u32 = .{ 1, 2, 3, 4, 5 };
     var it = AnalysisIterator(u32).init(&values);
 
