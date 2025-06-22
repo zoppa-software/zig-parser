@@ -101,8 +101,8 @@ test "埋め込み式の解析 - 変数の参照" {
     defer variables.deinit();
 
     // 変数の登録
-    try variables.regist(&String.newAllSlice("x"), &.{ .NumberExpress = 42 });
-    try variables.regist(&String.newAllSlice("y"), &.{ .NumberExpress = 100 });
+    try variables.registNumber(&String.newAllSlice("x"), 42);
+    try variables.registNumber(&String.newAllSlice("y"), 100);
 
     // 埋め込み式の解析
     var result = try Parser.translateFromLiteral(allocator, "変数参照 #{x} と #{y} の合計は #{x + y}");
@@ -125,16 +125,16 @@ test "埋め込み式の解析 - 条件分岐" {
     defer result.deinit();
 
     // 変数の設定
-    try variables.regist(&String.newAllSlice("a"), &.{ .NumberExpress = 100 });
-    try variables.regist(&String.newAllSlice("b"), &.{ .NumberExpress = 2 });
+    try variables.registNumber(&String.newAllSlice("a"), 100);
+    try variables.registNumber(&String.newAllSlice("b"), 2);
 
     // a > b
     const ans1 = try result.get(&variables);
     try std.testing.expectEqualStrings("条件分岐 aはbより大きい", ans1.String.raw());
 
     // 変数の設定
-    try variables.regist(&String.newAllSlice("a"), &.{ .NumberExpress = 5 });
-    try variables.regist(&String.newAllSlice("b"), &.{ .NumberExpress = 50 });
+    try variables.registNumber(&String.newAllSlice("a"), 5);
+    try variables.registNumber(&String.newAllSlice("b"), 50);
 
     // a > b
     const ans2 = try result.get(&variables);
@@ -171,20 +171,20 @@ test "if埋め込み式 - else if ブロックのテスト" {
     defer result.deinit();
 
     // a > b
-    try variables.regist(&String.newAllSlice("a"), &.{ .NumberExpress = 10 });
-    try variables.regist(&String.newAllSlice("b"), &.{ .NumberExpress = 5 });
+    try variables.registNumber(&String.newAllSlice("a"), 10);
+    try variables.registNumber(&String.newAllSlice("b"), 5);
     const ans1 = try result.get(&variables);
     try std.testing.expectEqualStrings("判定 a>b", ans1.String.raw());
 
     // a == b
-    try variables.regist(&String.newAllSlice("a"), &.{ .NumberExpress = 7 });
-    try variables.regist(&String.newAllSlice("b"), &.{ .NumberExpress = 7 });
+    try variables.registNumber(&String.newAllSlice("a"), 7);
+    try variables.registNumber(&String.newAllSlice("b"), 7);
     const ans2 = try result.get(&variables);
     try std.testing.expectEqualStrings("判定 a==b", ans2.String.raw());
 
     // a < b
-    try variables.regist(&String.newAllSlice("a"), &.{ .NumberExpress = 3 });
-    try variables.regist(&String.newAllSlice("b"), &.{ .NumberExpress = 8 });
+    try variables.registNumber(&String.newAllSlice("a"), 3);
+    try variables.registNumber(&String.newAllSlice("b"), 8);
     const ans3 = try result.get(&variables);
     try std.testing.expectEqualStrings("判定 a<b", ans3.String.raw());
 }
@@ -202,20 +202,20 @@ test "if埋め込み式 - ネストしたifブロック" {
     defer result.deinit();
 
     // a > 0, b > 0
-    try variables.regist(&String.newAllSlice("a"), &.{ .NumberExpress = 1 });
-    try variables.regist(&String.newAllSlice("b"), &.{ .NumberExpress = 2 });
+    try variables.registNumber(&String.newAllSlice("a"), 1);
+    try variables.registNumber(&String.newAllSlice("b"), 2);
     const ans1 = try result.get(&variables);
     try std.testing.expectEqualStrings("外内b正", ans1.String.raw());
 
     // a > 0, b <= 0
-    try variables.regist(&String.newAllSlice("a"), &.{ .NumberExpress = 1 });
-    try variables.regist(&String.newAllSlice("b"), &.{ .NumberExpress = -2 });
+    try variables.registNumber(&String.newAllSlice("a"), 1);
+    try variables.registNumber(&String.newAllSlice("b"), -2);
     const ans2 = try result.get(&variables);
     try std.testing.expectEqualStrings("外内b負", ans2.String.raw());
 
     // a <= 0
-    try variables.regist(&String.newAllSlice("a"), &.{ .NumberExpress = 0 });
-    try variables.regist(&String.newAllSlice("b"), &.{ .NumberExpress = 100 });
+    try variables.registNumber(&String.newAllSlice("a"), 0);
+    try variables.registNumber(&String.newAllSlice("b"), 100);
     const ans3 = try result.get(&variables);
     try std.testing.expectEqualStrings("外a負", ans3.String.raw());
 }
@@ -233,12 +233,12 @@ test "if埋め込み式 - else if 省略時の挙動" {
     defer result.deinit();
 
     // x = 真
-    try variables.regist(&String.newAllSlice("x"), &.{ .BooleanExpress = true });
+    try variables.registBoolean(&String.newAllSlice("x"), true);
     const ans1 = try result.get(&variables);
     try std.testing.expectEqualStrings("yes", ans1.String.raw());
 
     // x = 偽
-    try variables.regist(&String.newAllSlice("x"), &.{ .BooleanExpress = false });
+    try variables.registBoolean(&String.newAllSlice("x"), false);
     const ans2 = try result.get(&variables);
     try std.testing.expectEqualStrings("", ans2.String.raw());
 }
@@ -256,12 +256,12 @@ test "if埋め込み式 - elseブロックのみ" {
     defer result.deinit();
 
     // flag = 真
-    try variables.regist(&String.newAllSlice("flag"), &.{ .BooleanExpress = true });
+    try variables.registBoolean(&String.newAllSlice("flag"), true);
     const ans1 = try result.get(&variables);
     try std.testing.expectEqualStrings("ON", ans1.String.raw());
 
     // flag = 偽
-    try variables.regist(&String.newAllSlice("flag"), &.{ .BooleanExpress = false });
+    try variables.registBoolean(&String.newAllSlice("flag"), false);
     const ans2 = try result.get(&variables);
     try std.testing.expectEqualStrings("OFF", ans2.String.raw());
 }

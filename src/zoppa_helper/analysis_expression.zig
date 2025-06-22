@@ -97,7 +97,7 @@ pub const AnalysisExpression = union(enum) {
             },
             .VariableExpress => |var_expr| {
                 // 変数式の評価
-                variables.regist(&var_expr.name, var_expr.value) catch return Errors.OutOfMemoryVariables;
+                variables.registExpr(&var_expr.name, var_expr.value) catch return Errors.OutOfMemoryVariables;
                 return .{ .String = String.empty };
             },
             .IfExpress => |if_expr| {
@@ -197,8 +197,16 @@ pub const AnalysisExpression = union(enum) {
             },
             .IdentifierExpress => |id_expr| {
                 // 識別子式の評価
-                const value = variables.getExpr(&id_expr) catch return Errors.IdentifierParseFailed;
-                return try value.get(allocator, variables);
+                const value = variables.get(&id_expr) catch return Errors.IdentifierParseFailed;
+                return switch (value) {
+                    .expr => |expr| try expr.get(allocator, variables),
+                    .number => |n| .{ .Number = n },
+                    .string => |s| blk: {
+                        const new_s = String.newString(allocator, s.raw()) catch return Errors.OutOfMemoryString;
+                        break :blk .{ .String = new_s };
+                    },
+                    .boolean => |b| .{ .Boolean = b },
+                };
             },
             else => return Errors.InvalidExpression,
         };

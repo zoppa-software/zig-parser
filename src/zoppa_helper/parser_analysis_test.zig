@@ -159,8 +159,8 @@ test "変数の値を取得する" {
     var variables = try VariableEnv.init(allocator);
     defer variables.deinit();
 
-    try variables.regist(&String.newAllSlice("x"), &Expression{ .NumberExpress = 10 });
-    try variables.regist(&String.newAllSlice("y"), &Expression{ .NumberExpress = 5 });
+    try variables.registNumber(&String.newAllSlice("x"), 10);
+    try variables.registNumber(&String.newAllSlice("y"), 5);
 
     var ans1 = try Parser.executesFromLiteral(allocator, "x + y");
     defer ans1.deinit();
@@ -188,8 +188,8 @@ test "変数の値を取得する（文字列）" {
     var variables = try VariableEnv.init(allocator);
     defer variables.deinit();
 
-    try variables.regist(&String.newAllSlice("str1"), &Expression{ .NoEscapeStringExpress = String.newAllSlice("Hello") });
-    try variables.regist(&String.newAllSlice("str2"), &Expression{ .NoEscapeStringExpress = String.newAllSlice("World") });
+    try variables.registString(&String.newAllSlice("str1"), String.newAllSlice("Hello"));
+    try variables.registString(&String.newAllSlice("str2"), String.newAllSlice("World"));
 
     var ans1 = try Parser.executesFromLiteral(allocator, "str1 + str2");
     defer ans1.deinit();
@@ -202,8 +202,8 @@ test "三項演算子を使用する" {
     var variables = try VariableEnv.init(allocator);
     defer variables.deinit();
 
-    try variables.regist(&String.newAllSlice("x"), &Expression{ .NumberExpress = 10 });
-    try variables.regist(&String.newAllSlice("y"), &Expression{ .NumberExpress = 5 });
+    try variables.registNumber(&String.newAllSlice("x"), 10);
+    try variables.registNumber(&String.newAllSlice("y"), 5);
 
     var ans1 = try Parser.executesFromLiteral(allocator, "x > y ? x : y");
     defer ans1.deinit();

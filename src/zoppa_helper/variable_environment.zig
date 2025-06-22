@@ -12,6 +12,18 @@ const BTreeError = @import("stores/btree.zig").BTreeError;
 const VariableError = @import("analysis_error.zig").VariableError;
 const Expression = @import("analysis_expression.zig").AnalysisExpression;
 
+/// 変数の値を表す型です。
+pub const VariableValue = union(enum) {
+    /// 式
+    expr: *const Expression,
+    /// 数値
+    number: f64,
+    /// 文字列
+    string: *const String,
+    /// 真偽値
+    boolean: bool,
+};
+
 /// 変数管理階層を表す構造体です。
 /// 変数の登録、取得、削除を行います。
 pub const VariableEnvironment = struct {
@@ -30,7 +42,7 @@ pub const VariableEnvironment = struct {
         const cur = try Variables.init(alloc);
 
         // 最初の変数管理階層の追加
-        var hie = ArrayList(Variables).init(alloc);
+        var hie = try ArrayList(Variables).initCapacity(alloc, 4);
         try hie.append(cur);
 
         return VariableEnvironment{
@@ -55,8 +67,8 @@ pub const VariableEnvironment = struct {
             // 変数をクローンして新しい変数管理に追加
             while (iter.next()) |pair| {
                 if (pair.key) |key| {
-                    if (pair.value) |value| {
-                        try new_vars.regist(key, value);
+                    if (pair.value) |pvalue| {
+                        try new_vars.regist(key, pvalue);
                     }
                 }
             }
@@ -78,18 +90,47 @@ pub const VariableEnvironment = struct {
 
     /// 変数を追加します。
     /// 変数が既に存在する場合は、上書きされます。
-    pub fn regist(self: *VariableEnvironment, key: *const String, value: *const Expression) !void {
+    pub fn regist(self: *VariableEnvironment, key: *const String, value: VariableValue) !void {
         const regkey = try self.string_store.get(.{ key.raw(), key.raw().len });
         try self.hierarchy.items[self.hierarchy.items.len - 1].regist(regkey, value);
     }
 
+    /// 式の変数を追加します。
+    /// 変数が既に存在する場合は、上書きされます。
+    pub fn registExpr(self: *VariableEnvironment, key: *const String, value: *const Expression) !void {
+        const regkey = try self.string_store.get(.{ key.raw(), key.raw().len });
+        try self.hierarchy.items[self.hierarchy.items.len - 1].regist(regkey, .{ .expr = value });
+    }
+
+    /// 数値を持つ変数を追加します。
+    /// 変数が既に存在する場合は、上書きされます。
+    pub fn registNumber(self: *VariableEnvironment, key: *const String, value: f64) !void {
+        const regkey = try self.string_store.get(.{ key.raw(), key.raw().len });
+        try self.hierarchy.items[self.hierarchy.items.len - 1].regist(regkey, .{ .number = value });
+    }
+
+    /// 文字列を持つ変数を追加します。
+    /// 変数が既に存在する場合は、上書きされます。
+    pub fn registString(self: *VariableEnvironment, key: *const String, value: String) !void {
+        const regkey = try self.string_store.get(.{ key.raw(), key.raw().len });
+        const regvalue = try self.string_store.get(.{ value.raw(), value.raw().len });
+        try self.hierarchy.items[self.hierarchy.items.len - 1].regist(regkey, .{ .string = regvalue });
+    }
+
+    /// 真偽値を持つ変数を追加します。
+    /// 変数が既に存在する場合は、上書きされます。
+    pub fn registBoolean(self: *VariableEnvironment, key: *const String, value: bool) !void {
+        const regkey = try self.string_store.get(.{ key.raw(), key.raw().len });
+        try self.hierarchy.items[self.hierarchy.items.len - 1].regist(regkey, .{ .boolean = value });
+    }
+
     /// 変数を取得します。
     /// 変数が存在しない場合は、`NotFound`のエラーを返します。
-    pub fn getExpr(self: *VariableEnvironment, key: *const String) !*const Expression {
+    pub fn get(self: *VariableEnvironment, key: *const String) !VariableValue {
         var lv = self.hierarchy.items.len;
         while (lv > 0) : (lv -= 1) {
-            const res = self.hierarchy.items[lv - 1].getExpr(key) catch |err| {
-                if (err != VariableError.RetrievalFailed) {
+            const res = self.hierarchy.items[lv - 1].get(key) catch |err| {
+                if (err != VariableError.NotFound) {
                     return err;
                 }
                 continue;
@@ -142,7 +183,7 @@ const Variables = struct {
     // 変数情報
     pub const Pair = struct {
         key: ?*const String,
-        value: ?*const Expression,
+        value: ?VariableValue,
     };
 
     /// 変数管理の初期化を行います。
@@ -159,25 +200,24 @@ const Variables = struct {
 
     /// 変数を追加します。
     /// 変数が既に存在する場合は、上書きされます。
-    pub fn regist(self: *Variables, key: *const String, value: *const Expression) !void {
+    pub fn regist(self: *Variables, key: *const String, value: VariableValue) !void {
         const pair = Pair{ .key = key, .value = value };
         if (self.variable.search(pair)) |v| {
-            v.* = pair;
+            v.value = pair.value;
         } else {
             try self.variable.insert(pair);
         }
     }
 
     /// 変数を取得します。
-    /// 変数が存在しない場合は、nullを返します。
-    pub fn getExpr(self: *Variables, key: *const String) !*const Expression {
-        const pair = Pair{ .key = key, .value = null };
+    pub fn get(self: *Variables, key: *const String) !VariableValue {
+        const pair = Pair{ .key = key, .value = .{ .number = 0 } };
         if (self.variable.search(pair)) |v| {
-            if (v.value) |res| {
-                return res;
+            if (v.value) |value| {
+                return value;
             }
         }
-        return VariableError.RetrievalFailed;
+        return VariableError.NotFound;
     }
 
     /// 変数を削除します。
@@ -212,38 +252,38 @@ test "変数管理階層の操作" {
 
     // 変数の登録
     const key1 = String.newAllSlice("a");
-    const expr1 = Expression{ .NumberExpress = 10 };
-    try env.regist(&key1, &expr1);
+    try env.registNumber(&key1, 10);
 
     const key2 = String.newAllSlice("b");
-    const expr2 = Expression{ .NumberExpress = 20 };
-    try env.regist(&key2, &expr2);
+    try env.registNumber(&key2, 20);
 
     // 変数の取得
-    const res1 = try env.getExpr(&key1);
-    try std.testing.expectEqual(&expr1, res1);
+    const res1 = try env.get(&key1);
+    try std.testing.expectEqual(10, res1.number);
 
-    const res2 = try env.getExpr(&key2);
-    try std.testing.expectEqual(&expr2, res2);
+    const res2 = try env.get(&key2);
+    try std.testing.expectEqual(20, res2.number);
 
     // 変数の削除
     try env.unregist(&key1);
-    try std.testing.expectError(VariableError.NotFound, env.getExpr(&key1));
+    try std.testing.expectError(VariableError.NotFound, env.get(&key1));
+    try env.registNumber(&key1, 10);
 
     // 変数階数の追加と削除
     try env.addHierarchy();
-    const expr3 = Expression{ .NumberExpress = 30 };
-    try env.regist(&key1, &expr3);
-    const res3 = try env.getExpr(&key1);
-    try std.testing.expectEqual(&expr3, res3);
+    try env.registNumber(&key1, 30);
+    const res3 = try env.get(&key1);
+    try std.testing.expectEqual(30, res3.number);
 
     env.removeHierarchy();
-    try std.testing.expectEqual(&expr1, res1);
+
+    const res4 = try env.get(&key1);
+    try std.testing.expectEqual(10, res4.number);
 
     // 変数のクローン
     var cloned_env = try env.clone();
     defer cloned_env.deinit();
-    const cloned_res2 = try cloned_env.getExpr(&key2);
-    try std.testing.expectEqual(&expr2, cloned_res2);
-    try std.testing.expectEqual(&expr2, res2);
+    const cloned_res2 = try cloned_env.get(&key2);
+    try std.testing.expectEqual(20, cloned_res2.number);
+    try std.testing.expectEqual(20, res2.number);
 }
