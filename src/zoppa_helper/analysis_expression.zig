@@ -24,7 +24,7 @@ fn deinitExpression(alloc: Allocator, expr: *AnalysisExpression) void {
     switch (expr.*) {
         .ListExpress => |list_expr| alloc.free(list_expr.exprs),
         .VariableListExpress => |vlist_expr| alloc.free(vlist_expr),
-        .IfExpress => |if_expr| alloc.free(if_expr.exprs),
+        .IfExpress => |if_expr| alloc.free(if_expr),
         .ArrayVariableExpress => |array_expr| alloc.free(array_expr),
         else => {},
     }
@@ -38,9 +38,9 @@ pub const AnalysisExpression = union(enum) {
     NoEscapeUnfoldExpress: *AnalysisExpression,
     VariableListExpress: []*AnalysisExpression,
     VariableExpress: struct { name: String, value: *AnalysisExpression },
-    IfExpress: struct { exprs: []*AnalysisExpression },
+    IfExpress: []*AnalysisExpression,
     IfConditionExpress: struct { condition: *AnalysisExpression, inner: *AnalysisExpression },
-    ElseExpress: struct { inner: *AnalysisExpression },
+    ElseExpress: *AnalysisExpression,
     TernaryExpress: struct { condition: *AnalysisExpression, true_expr: *AnalysisExpression, false_expr: *AnalysisExpression },
     ParenExpress: *AnalysisExpression,
     BinaryExpress: struct { kind: Lexical.WordType, left: *AnalysisExpression, right: *AnalysisExpression },
@@ -100,28 +100,40 @@ pub const AnalysisExpression = union(enum) {
                 variables.regist(&var_expr.name, var_expr.value) catch return Errors.OutOfMemoryVariables;
                 return .{ .String = String.empty };
             },
-            //.IfExpress => |if_expr| {
-            //    var result: ?Value = null;
-            //    for (if_expr.exprs) |expr| {
-            //        if (result) |val| {
-            //            if (val.isTrue()) {
-            //                break;
-            //            }
-            //        }
-            //        result = try expr.get(allocator, variables);
-            //    }
-            //    return result orelse Value.None;
-            //},
-            //.IfConditionExpress => |cond_expr| {
-            //    const condition_value = try cond_expr.condition.get(allocator, variables);
-            //    if (!condition_value.isTrue()) {
-            //        return Value.None;
-            //    }
-            //    return try cond_expr.inner.get(allocator, variables);
-            //},
-            //.ElseExpress => |else_expr| {
-            //    return try else_expr.inner.get(allocator, variables);
-            //},
+            .IfExpress => |if_expr| {
+                // if式の評価
+                // 条件式を順に評価し、最初に真となる条件の内側の式を評価します。
+                // もしどの条件も真でない場合は、else式を評価します。
+                for (if_expr) |expr| {
+                    switch (expr.*) {
+                        .IfConditionExpress => |cond_expr| {
+                            // 条件式の評価
+                            // 変数環境に階層を追加して、条件式の評価を行います。
+                            variables.addHierarchy() catch return Errors.AddVariableHierarchyFailed;
+                            defer variables.removeHierarchy();
+
+                            // 条件式の値を取得、条件が真の場合、内側の式を評価
+                            const condition_value = try cond_expr.condition.get(allocator, variables);
+                            defer condition_value.deinit(allocator);
+                            if (condition_value.Boolean) {
+                                return try cond_expr.inner.get(allocator, variables);
+                            }
+                        },
+                        .ElseExpress => |else_expr| {
+                            // else式の評価
+                            // 変数環境に階層を追加して、else式の評価を行います。
+                            variables.addHierarchy() catch return Errors.AddVariableHierarchyFailed;
+                            defer variables.removeHierarchy();
+                            return try else_expr.get(allocator, variables);
+                        },
+                        else => {
+                            // 他の式は無視
+                            return Errors.InvalidIfStatement;
+                        },
+                    }
+                }
+                return .{ .String = String.empty };
+            },
             .TernaryExpress => |ternary_expr| {
                 // 三項演算子の評価
                 const condition_value = try ternary_expr.condition.get(allocator, variables);

@@ -48,6 +48,10 @@ pub const ParserError = error{
     VariableAssignmentMissing,
     /// 変数の値が無い場合のエラー
     VariableValueMissing,
+    /// Ifブロックが閉じられていない場合のエラー
+    IfBlockNotClosed,
+    /// Ifブロックが開始されていない場合のエラー
+    IfBlockNotStarted,
 };
 
 /// 変数エラー列挙型
@@ -62,6 +66,8 @@ pub const VariableError = error{
     UnregistFailed,
     /// 変数が存在しない場合のエラー
     NotFound,
+    /// 変数階層の追加に失敗した場合のエラー
+    AddVariableHierarchyFailed,
 };
 
 /// 値の操作に失敗した場合のエラー
@@ -120,6 +126,8 @@ pub const ValueError = error{
     NotAnArray,
     /// 文字列に変換できない場合のエラー
     CannotConvertToString,
+    /// 無効なIf文の場合のエラー
+    InvalidIfStatement,
 
     /// 計算に失敗した場合のエラー
     CalculationFailed,

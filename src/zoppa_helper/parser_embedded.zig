@@ -65,13 +65,17 @@ pub fn embeddedTextParser(
                     exprs.append(expr) catch return ParserError.OutOfMemoryExpression;
                     _ = iter.next();
                 } else {
-                    return ParserError.InvalidExpression;
+                    return ParserError.IfBlockNotClosed;
                 }
             },
-            else => {
-                // サポートされていない埋め込み式の場合はエラーを返す
-                return ParserError.UnsupportedEmbeddedExpression;
+            .ElseIfBlock, .ElseBlock, .EndIfBlock => {
+                // ElseIfブロックまたはElseブロックを解析
+                return ParserError.IfBlockNotStarted;
             },
+            //else => {
+            //    // サポートされていない埋め込み式の場合はエラーを返す
+            //    return ParserError.UnsupportedEmbeddedExpression;
+            //},
         }
     }
 
@@ -211,7 +215,7 @@ fn parseIfBlock(
     // If式をリストとして返します
     const if_expr = store.get({}) catch return ParserError.OutOfMemoryExpression;
     const if_exprs = exprs.toOwnedSlice() catch return ParserError.OutOfMemoryExpression;
-    if_expr.* = .{ .IfExpress = .{ .exprs = if_exprs } };
+    if_expr.* = .{ .IfExpress = if_exprs };
     return if_expr;
 }
 
@@ -248,7 +252,7 @@ fn parseIfExpression(
 
             // Elseブロックの条件式を作成
             const else_expr = store.get({}) catch return ParserError.OutOfMemoryExpression;
-            else_expr.* = .{ .ElseExpress = .{ .inner = inner_expr } };
+            else_expr.* = .{ .ElseExpress = inner_expr };
             return else_expr;
         },
         else => return ParserError.ConditionParseFailed,
