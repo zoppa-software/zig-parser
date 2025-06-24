@@ -52,6 +52,7 @@ pub const AnalysisExpression = union(enum) {
     ArrayVariableExpress: []*AnalysisExpression,
     ArrayExpress: struct { ident: *AnalysisExpression, index: *AnalysisExpression },
     IdentifierExpress: String,
+    ForExpress: struct { var_name: String, collection: *AnalysisExpression, body: *AnalysisExpression },
 
     /// 式を評価して値を取得します。
     pub fn get(self: *const AnalysisExpression, allocator: Allocator, variables: *VariableEnv) Errors!Value {
@@ -133,6 +134,53 @@ pub const AnalysisExpression = union(enum) {
                     }
                 }
                 return .{ .String = String.empty };
+            },
+            .ForExpress => |for_expr| {
+                // for式の評価
+                // 変数環境に階層を追加して、for式の評価を行います。
+                variables.addHierarchy() catch return Errors.AddVariableHierarchyFailed;
+                defer variables.removeHierarchy();
+
+                // コレクションの値を取得
+                const collection_value = try for_expr.collection.get(allocator, variables);
+                defer collection_value.deinit(allocator);
+
+                // for式の評価
+                var values = ArrayList(u8).init(allocator);
+                defer values.deinit();
+
+                // コレクションが配列であることを確認
+                switch (collection_value) {
+                    .Array => |arr| {
+                        for (arr) |item| {
+                            // 各アイテムに対して変数を登録
+                            switch (item) {
+                                .String => |s| {
+                                    // 文字列の場合、変数に登録
+                                    variables.registString(&for_expr.var_name, s) catch return Errors.OutOfMemoryVariables;
+                                },
+                                .Number => |n| {
+                                    // 数値の場合、変数に登録
+                                    variables.registNumber(&for_expr.var_name, n) catch return Errors.OutOfMemoryVariables;
+                                },
+                                .Boolean => |b| {
+                                    // 真偽値の場合、変数に登録
+                                    variables.registBoolean(&for_expr.var_name, b) catch return Errors.OutOfMemoryVariables;
+                                },
+                                else => return Errors.InvalidForCollection,
+                            }
+
+                            // ボディの式を評価
+                            const body_value = try for_expr.body.get(allocator, variables);
+                            defer body_value.deinit(allocator);
+
+                            // ボディの評価結果を文字列に変換してバッファに追加
+                            values.appendSlice(body_value.String.raw()) catch return Errors.OutOfMemoryString;
+                        }
+                    },
+                    else => return Errors.InvalidForCollection,
+                }
+                return .{ .String = String.newString(allocator, values.items) catch return Errors.OutOfMemoryString };
             },
             .TernaryExpress => |ternary_expr| {
                 // 三項演算子の評価

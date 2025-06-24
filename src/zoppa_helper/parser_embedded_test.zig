@@ -345,3 +345,50 @@ test "埋め込み式の解析 - 変数宣言エラー" {
     };
     defer result4.deinit();
 }
+
+test "埋め込み式の解析 - 変数の初期化と参照" {
+    const allocator = std.testing.allocator;
+    var store: ExpressionStore = try ExpressionStore.init(allocator);
+    defer store.deinit();
+
+    var variables = try VariableEnv.init(allocator);
+    defer variables.deinit();
+
+    // 変数の初期化
+    var result = try Parser.translateFromLiteral(allocator, "${x = 42; y = 100} x=#{x}, y=#{y}");
+    defer result.deinit();
+
+    // 変数の登録
+    const ans = try result.get(&variables);
+    try std.testing.expectEqualStrings(" x=42, y=100", ans.String.raw());
+}
+
+test "埋め込み式の解析 - 変数の初期化と参照 - エラーケース" {
+    const allocator = std.testing.allocator;
+    var store: ExpressionStore = try ExpressionStore.init(allocator);
+    defer store.deinit();
+
+    // 変数の初期化でエラー
+    var result = Parser.translateFromLiteral(allocator, "${x = 10; y = }") catch |err| {
+        try std.testing.expectEqual(Errors.VariableValueMissing, err);
+        return;
+    };
+    defer result.deinit();
+}
+
+test "for埋め込み式の解析" {
+    const allocator = std.testing.allocator;
+    var store: ExpressionStore = try ExpressionStore.init(allocator);
+    defer store.deinit();
+
+    // forブロックの解析
+    var result = try Parser.translateFromLiteral(allocator, "{for i in [1,2,3,4,5]}i=#{i}{/for}");
+    defer result.deinit();
+
+    // 変数の登録
+    var variables = try VariableEnv.init(allocator);
+    defer variables.deinit();
+
+    const ans = try result.get(&variables);
+    try std.testing.expectEqualStrings("i=1i=2i=3i=4i=5", ans.String.raw());
+}

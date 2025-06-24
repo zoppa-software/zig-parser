@@ -52,6 +52,14 @@ pub const ParserError = error{
     IfBlockNotClosed,
     /// Ifブロックが開始されていない場合のエラー
     IfBlockNotStarted,
+    /// Forブロックが閉じられていない場合のエラー
+    ForBlockNotClosed,
+    /// For構文の解析に失敗した場合のエラー
+    ForParseFailed,
+    /// Forブロックが開始されていない場合のエラー
+    ForBlockNotStarted,
+    /// Forブロックのコレクションが指定されていない場合のエラー
+    InvalidForCollection,
 };
 
 /// 変数エラー列挙型

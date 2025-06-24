@@ -408,3 +408,36 @@ pub fn variableParser(
     expr.* = .{ .VariableExpress = .{ .name = name, .value = value } };
     return expr;
 }
+
+/// For文の式を解析します。
+/// この関数は、For文の変数名とコレクションを解析し、結果を `Expression` として返します。
+pub fn forStatementParser(
+    allocator: Allocator,
+    store: *ExpressionStore,
+    iter: *Iterator(Lexical.Word),
+) ParserError!*Expression {
+    // 変数の名前を取得
+    var name: String = undefined;
+    if (iter.peek()) |word| {
+        if (word.kind == .Identifier) {
+            name = word.str;
+        } else {
+            return ParserError.InvalidVariableName;
+        }
+    }
+    _ = iter.next();
+
+    // 'in' があるか確認
+    if (iter.peek()) |word| {
+        if (word.kind != .InKeyword) return ParserError.ForParseFailed;
+    }
+    _ = iter.next();
+
+    // 変数の値を解析
+    const collection = ternaryOperatorParser(allocator, store, iter) catch return ParserError.ForParseFailed;
+
+    // 変数の式を作成
+    const expr = store.get({}) catch return ParserError.OutOfMemoryExpression;
+    expr.* = .{ .ForExpress = .{ .var_name = name, .collection = collection, .body = undefined } };
+    return expr;
+}

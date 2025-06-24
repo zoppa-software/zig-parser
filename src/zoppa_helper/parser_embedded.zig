@@ -59,7 +59,7 @@ pub fn embeddedTextParser(
                 _ = iter.next();
             },
             .IfBlock => {
-                // Ifブロックを解析、最後の埋め込み式が EndIfBlock であることを確認します
+                // Ifブロックを解析、最後の埋め込み式が EndIf であることを確認します
                 const expr = try parseIfBlock(allocator, store, iter);
                 if (iter.hasNext() and iter.peek().?.kind == .EndIfBlock) {
                     exprs.append(expr) catch return ParserError.OutOfMemoryExpression;
@@ -69,8 +69,26 @@ pub fn embeddedTextParser(
                 }
             },
             .ElseIfBlock, .ElseBlock, .EndIfBlock => {
-                // ElseIfブロックまたはElseブロックを解析
+                // ElseIfブロックまたはElseブロック、EndIfを解析
                 return ParserError.IfBlockNotStarted;
+            },
+            .ForBlock => {
+                // Forブロックを解析、最後の埋め込み式が EndFor であることを確認します
+                const expr = try parseForBlock(allocator, store, iter);
+                if (iter.hasNext() and iter.peek().?.kind == .EndForBlock) {
+                    exprs.append(expr) catch return ParserError.OutOfMemoryExpression;
+                    _ = iter.next();
+                } else {
+                    return ParserError.ForBlockNotClosed;
+                }
+            },
+            .EndForBlock => {
+                // EndForブロックを解析
+                return ParserError.IfBlockNotStarted;
+            },
+            .EmptyBlock => {
+                // 空のブロックは無視します
+                _ = iter.next();
             },
             //else => {
             //    // サポートされていない埋め込み式の場合はエラーを返す
@@ -256,5 +274,63 @@ fn parseIfExpression(
             return else_expr;
         },
         else => return ParserError.ConditionParseFailed,
+    }
+}
+
+/// For埋め込み式を解析します。
+/// `parser` は自身のパーサーインスタンスで、`iter` はブロックのイテレータです。
+fn parseForBlock(
+    allocator: Allocator,
+    store: *ExpressionStore,
+    iter: *Iterator(Lexical.EmbeddedText),
+) ParserError!*Expression {
+    // forブロックの開始を取得
+    var for_condition = iter.peek().?;
+    _ = iter.next();
+
+    // forの繰り返し範囲を取得
+    const start: usize = iter.index;
+    var end: usize = iter.index;
+    var lv: u8 = 0;
+    var end_for = false;
+    while (iter.hasNext()) {
+        const blk = iter.peek().?;
+        switch (blk.kind) {
+            // for が開始された場合、ネストレベルを増やす
+            .ForBlock => lv += 1,
+
+            // Ifが終了された場合、ネストレベルを減らす
+            .EndForBlock => {
+                if (lv > 0) {
+                    lv -= 1;
+                } else {
+                    // ネストが終了でループも終了
+                    end_for = true;
+                    break;
+                }
+            },
+            else => {},
+        }
+        _ = iter.next();
+        end = iter.index;
+    }
+
+    if (end_for) {
+        // 入力文字列を単語に分割します
+        const words = Lexical.splitWords(allocator, &for_condition.str) catch return ParserError.OutOfMemoryString;
+        defer allocator.free(words);
+
+        // forの繰り返し条件を解析します
+        var iter_words = Iterator(Lexical.Word).init(words);
+        var for_expr = try Executes.forStatementParser(allocator, store, &iter_words);
+
+        // forの繰り返す範囲を式として解析します
+        var in_iter = Iterator(Lexical.EmbeddedText).init(iter.items[start..end]);
+        for_expr.ForExpress.body = try embeddedTextParser(allocator, store, &in_iter);
+
+        return for_expr;
+    } else {
+        // Forブロックが閉じられていない場合はエラーを返
+        return ParserError.ForBlockNotClosed;
     }
 }

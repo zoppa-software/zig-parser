@@ -40,6 +40,7 @@ pub const WordType = enum {
     OrOperator, // 論理和
     XorOperator, // 排他的論理和
     Dollar, // ダラー
+    InKeyword, // inキーワード
 };
 
 /// 埋め込み式の種類を表す列挙型。
@@ -52,6 +53,9 @@ pub const EmbeddedType = enum {
     ElseIfBlock, // else ifブロック
     ElseBlock, // elseブロック
     EndIfBlock, // endifブロック
+    ForBlock, // forブロック
+    EndForBlock, // endforブロック
+    EmptyBlock, // 空ブロック
 };
 
 /// 単語を表す構造体。
@@ -291,6 +295,8 @@ fn getWordString(split_char: *const [256]bool, input: *const String, iter: *Stri
         return .{ .str = keyword, .kind = WordType.OrOperator };
     } else if (isKeyword(&keyword, "xor")) { // 排他的論理和
         return .{ .str = keyword, .kind = WordType.XorOperator };
+    } else if (isKeyword(&keyword, "in")) { // inキーワード
+        return .{ .str = keyword, .kind = WordType.InKeyword };
     } else {
         // その他のキーワードは識別子として扱う
         return .{ .str = keyword, .kind = WordType.Identifier };
@@ -425,8 +431,12 @@ fn getCommandBlock(input: *const String, iter: *String.Iterator) LexicalError!Em
         return .{ .str = cmd, .kind = EmbeddedType.ElseBlock };
     } else if (cmd.eqlLiteral("{/if}")) {
         return .{ .str = cmd, .kind = EmbeddedType.EndIfBlock };
+    } else if (cmd.startWithLiteral("{for")) {
+        return .{ .str = cmd.mid(5, cmd.len() - 6), .kind = EmbeddedType.ForBlock };
+    } else if (cmd.eqlLiteral("{/for}")) {
+        return .{ .str = cmd, .kind = EmbeddedType.EndForBlock };
     } else if (cmd.eqlLiteral("{}")) {
-        return .{ .str = cmd, .kind = EmbeddedType.EndIfBlock };
+        return .{ .str = cmd, .kind = EmbeddedType.EmptyBlock };
     } else {
         return error.InvalidCommandError;
     }

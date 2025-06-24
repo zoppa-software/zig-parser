@@ -179,3 +179,18 @@ test "getNumberToken test" {
         try std.testing.expectEqual(LexicalError.ConsecutiveUnderscoreError, err);
     }
 }
+
+test "for test" {
+    const allocator = std.testing.allocator;
+    const input = String.newAllSlice("{for i in [1,2,3]}{/for}");
+    defer input.deinit();
+
+    const tokens = try Lexical.splitEmbeddedText(allocator, &input);
+    defer allocator.free(tokens);
+
+    try testing.expectEqual(2, tokens.len);
+    try testing.expectEqualSlices(u8, "i in [1,2,3]", tokens[0].str.raw());
+    try testing.expect(tokens[0].kind == Lexical.EmbeddedType.ForBlock);
+    try testing.expectEqualSlices(u8, "{/for}", tokens[1].str.raw());
+    try testing.expect(tokens[1].kind == Lexical.EmbeddedType.EndForBlock);
+}
