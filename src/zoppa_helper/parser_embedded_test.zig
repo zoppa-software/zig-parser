@@ -391,4 +391,99 @@ test "for埋め込み式の解析" {
 
     const ans = try result.get(&variables);
     try std.testing.expectEqualStrings("i=1i=2i=3i=4i=5", ans.String.raw());
+
+    // 二重forブロックの解析
+    var result2 = try Parser.translateFromLiteral(allocator, "{for i in [1,2]}{for j in [3,4]}i=#{i}, j=#{j} {/for}{/for}");
+    defer result2.deinit();
+
+    const ans2 = try result2.get(&variables);
+    try std.testing.expectEqualStrings("i=1, j=3 i=1, j=4 i=2, j=3 i=2, j=4 ", ans2.String.raw());
+}
+
+test "for埋め込み式の解析 - エラーケース" {
+    const allocator = std.testing.allocator;
+    var store: ExpressionStore = try ExpressionStore.init(allocator);
+    defer store.deinit();
+
+    // forブロックが閉じられていない
+    var result = Parser.translateFromLiteral(allocator, "{for i in [1,2,3]}i=#{i}") catch |err| {
+        try std.testing.expectEqual(Errors.ForBlockNotClosed, err);
+        return;
+    };
+    defer result.deinit();
+
+    // forブロックが開始されていない
+    var result2 = Parser.translateFromLiteral(allocator, "{/for}") catch |err| {
+        try std.testing.expectEqual(Errors.ForBlockNotStarted, err);
+        return;
+    };
+    defer result2.deinit();
+
+    // コレクションが指定されていない
+    var result3 = Parser.translateFromLiteral(allocator, "{for i in }i=#{i}{/for}") catch |err| {
+        try std.testing.expectEqual(Errors.ForParseFailed, err);
+        return;
+    };
+    defer result3.deinit();
+}
+
+test "select 埋め込み式の解析" {
+    const allocator = std.testing.allocator;
+    var store: ExpressionStore = try ExpressionStore.init(allocator);
+    defer store.deinit();
+
+    // selectブロックの解析
+    var result = try Parser.translateFromLiteral(allocator, "{select a}select式 {case 1}aは1です{case 2}aは2です{default}ケース外です{/select}");
+    defer result.deinit();
+
+    // 変数の登録
+    var variables = try VariableEnv.init(allocator);
+    defer variables.deinit();
+
+    // caseの値を変更
+    try variables.registNumber(&String.newAllSlice("a"), 1);
+    const ans2 = try result.get(&variables);
+    try std.testing.expectEqualStrings("select式 aは1です", ans2.String.raw());
+
+    try variables.registNumber(&String.newAllSlice("a"), 2);
+    const ans3 = try result.get(&variables);
+    try std.testing.expectEqualStrings("select式 aは2です", ans3.String.raw());
+
+    try variables.registNumber(&String.newAllSlice("a"), 3);
+    const ans4 = try result.get(&variables);
+    try std.testing.expectEqualStrings("select式 ケース外です", ans4.String.raw());
+}
+
+test "select 埋め込み式の解析 - エラーケース" {
+    const allocator = std.testing.allocator;
+    var store: ExpressionStore = try ExpressionStore.init(allocator);
+    defer store.deinit();
+
+    // selectブロックが閉じられていない
+    var result = Parser.translateFromLiteral(allocator, "{select a}select式 {case 1}aは1です") catch |err| {
+        try std.testing.expectEqual(Errors.SelectBlockNotClosed, err);
+        return;
+    };
+    defer result.deinit();
+
+    // selectブロックが開始されていない
+    var result2 = Parser.translateFromLiteral(allocator, "{/select}") catch |err| {
+        try std.testing.expectEqual(Errors.SelectBlockNotStarted, err);
+        return;
+    };
+    defer result2.deinit();
+
+    // 評価式が指定されていない
+    var result3 = Parser.translateFromLiteral(allocator, "{select }select式 {/select}") catch |err| {
+        try std.testing.expectEqual(Errors.InvalidSelectExpression, err);
+        return;
+    };
+    defer result3.deinit();
+
+    // caseに値が指定されていない
+    var result4 = Parser.translateFromLiteral(allocator, "{select a}{case }aは1です{/select}") catch |err| {
+        try std.testing.expectEqual(Errors.InvalidSelectCaseValue, err);
+        return;
+    };
+    defer result4.deinit();
 }

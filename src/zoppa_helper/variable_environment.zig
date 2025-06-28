@@ -31,61 +31,51 @@ pub const VariableEnvironment = struct {
     allocator: Allocator,
 
     // 変数リスト
-    hierarchy: ArrayList(Variables),
+    hierarchy: ArrayList(*Variables),
 
     // 文字列のストア
     string_store: Store(String, 32, initString, deinitString),
 
+    // 変数管理のストア
+    variable_store: Store(Variables, 4, initVariable, deinitVariable),
+
     /// 変数管理階層の初期化を行います。
     pub fn init(alloc: Allocator) !VariableEnvironment {
-        // 変数管理の生成
-        const cur = try Variables.init(alloc);
+        var env = VariableEnvironment{
+            .allocator = alloc,
+            .hierarchy = try ArrayList(*Variables).initCapacity(alloc, 4),
+            .string_store = try Store(String, 32, initString, deinitString).init(alloc),
+            .variable_store = try Store(Variables, 4, initVariable, deinitVariable).init(alloc),
+        };
 
         // 最初の変数管理階層の追加
-        var hie = try ArrayList(Variables).initCapacity(alloc, 4);
-        try hie.append(cur);
+        const cur = try env.variable_store.get(.{});
+        try cur.init(alloc);
+        try env.hierarchy.append(cur);
 
-        return VariableEnvironment{
-            .allocator = alloc,
-            .hierarchy = hie,
-            .string_store = try Store(String, 32, initString, deinitString).init(alloc),
-        };
+        return env;
     }
 
-    /// 変数管理階層のクローンを作成します。
-    /// 変数の値は参照カウントされます。
-    pub fn clone(self: *const VariableEnvironment) !VariableEnvironment {
-        var new_env = try VariableEnvironment.init(self.allocator);
-        for (self.hierarchy.items) |*v| {
-            // 新しい変数管理を作成
-            var new_vars = try Variables.init(self.allocator);
-
-            // 変数管理のイテレータを取得
-            var iter = try v.variable.iterate();
-            defer iter.deinit();
-
-            // 変数をクローンして新しい変数管理に追加
-            while (iter.next()) |pair| {
-                if (pair.key) |key| {
-                    if (pair.value) |pvalue| {
-                        try new_vars.regist(key, pvalue);
-                    }
-                }
-            }
-            // 新しい変数管理を新しい階層に追加
-            try new_env.hierarchy.append(new_vars);
-        }
-        return new_env;
-    }
+    // 変数管理階層のクローンを作成します。
+    // 変数の値は参照カウントされます。
+    //pub fn clone(self: *const VariableEnvironment) !VariableEnvironment {
+    //    var new_env = try VariableEnvironment.init(self.allocator);
+    //    // 新しい変数管理を作成
+    //    for (self.hierarchy.items) |v| {
+    //        try new_env.hierarchy.append(v);
+    //    }
+    //    return new_env;
+    //}
 
     /// 変数管理階層の解放を行います。
     pub fn deinit(self: *VariableEnvironment) void {
-        for (self.hierarchy.items) |*v| {
-            v.deinit();
+        var iter = self.variable_store.iterate() catch {};
+        while (iter.next()) |item| {
+            item.deinit();
         }
         self.hierarchy.deinit();
-
         self.string_store.deinit();
+        self.variable_store.deinit();
     }
 
     /// 変数を追加します。
@@ -146,17 +136,22 @@ pub const VariableEnvironment = struct {
         try self.hierarchy.items[self.hierarchy.items.len - 1].unregist(key);
     }
 
-    /// 変数の階層を追加します。
+    // 変数の階層を追加します。
     pub fn addHierarchy(self: *VariableEnvironment) !void {
-        const new_vars = try Variables.init(self.allocator);
-        try self.hierarchy.append(new_vars);
+        const cur = try self.variable_store.get(.{});
+        if (!cur.flag) {
+            try cur.init(self.allocator);
+        }
+        try self.hierarchy.append(cur);
     }
 
-    /// 変数の階層を削除します。
+    // 変数の階層を削除します。
     pub fn removeHierarchy(self: *VariableEnvironment) void {
         if (self.hierarchy.items.len > 1) {
-            var cur: Variables = self.hierarchy.pop().?;
-            cur.deinit();
+            if (self.hierarchy.pop()) |current| {
+                //current.variable.deinit();
+                self.variable_store.pop(current) catch {};
+            }
         }
     }
 };
@@ -175,8 +170,17 @@ fn deinitString(_: Allocator, str: *String) void {
     str.deinit();
 }
 
+/// 変数管理の初期化関数（空実装）
+fn initVariable(_: Allocator, _: *Variables, _: anytype) !void {}
+
+/// 変数管理の破棄関数（空実装）
+fn deinitVariable(_: Allocator, _: *Variables) void {}
+
 /// 変数管理を行う構造体です。
 const Variables = struct {
+    //
+    flag: bool = false,
+
     // 変数リスト
     variable: BTree(Pair, 4, comparePair),
 
@@ -187,15 +191,17 @@ const Variables = struct {
     };
 
     /// 変数管理の初期化を行います。
-    pub fn init(alloc: Allocator) !Variables {
-        return Variables{
-            .variable = try BTree(Pair, 4, comparePair).init(alloc),
-        };
+    pub fn init(self: *Variables, alloc: Allocator) !void {
+        self.flag = true;
+        self.variable = try BTree(Pair, 4, comparePair).init(alloc);
     }
 
     /// 変数管理の解放を行います。
     pub fn deinit(self: *Variables) void {
-        self.variable.deinit();
+        if (self.flag) {
+            self.variable.deinit();
+            self.flag = false;
+        }
     }
 
     /// 変数を追加します。
@@ -281,9 +287,9 @@ test "変数管理階層の操作" {
     try std.testing.expectEqual(10, res4.number);
 
     // 変数のクローン
-    var cloned_env = try env.clone();
-    defer cloned_env.deinit();
-    const cloned_res2 = try cloned_env.get(&key2);
-    try std.testing.expectEqual(20, cloned_res2.number);
-    try std.testing.expectEqual(20, res2.number);
+    //var cloned_env = try env.clone();
+    //defer cloned_env.deinit();
+    //const cloned_res2 = try cloned_env.get(&key2);
+    //try std.testing.expectEqual(20, cloned_res2.number);
+    //try std.testing.expectEqual(20, res2.number);
 }

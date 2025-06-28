@@ -1,3 +1,6 @@
+///! lexical_analysis.zig
+/// 字句解析を行うモジュールです。
+/// このモジュールは、入力文字列をトークンに分割し、トークンの種類を識別します。
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const String = @import("strings/string.zig").String;
@@ -55,6 +58,10 @@ pub const EmbeddedType = enum {
     EndIfBlock, // endifブロック
     ForBlock, // forブロック
     EndForBlock, // endforブロック
+    SelectBlock, // selectブロック
+    SelectCaseBlock, // select caseブロック
+    SelectDefaultBlock, // select defaultブロック
+    EndSelectBlock, // endselectブロック
     EmptyBlock, // 空ブロック
 };
 
@@ -435,6 +442,14 @@ fn getCommandBlock(input: *const String, iter: *String.Iterator) LexicalError!Em
         return .{ .str = cmd.mid(5, cmd.len() - 6), .kind = EmbeddedType.ForBlock };
     } else if (cmd.eqlLiteral("{/for}")) {
         return .{ .str = cmd, .kind = EmbeddedType.EndForBlock };
+    } else if (cmd.startWithLiteral("{select")) {
+        return .{ .str = cmd.mid(8, cmd.len() - 9), .kind = EmbeddedType.SelectBlock };
+    } else if (cmd.startWithLiteral("{case")) {
+        return .{ .str = cmd.mid(6, cmd.len() - 7), .kind = EmbeddedType.SelectCaseBlock };
+    } else if (cmd.startWithLiteral("{default}")) {
+        return .{ .str = cmd, .kind = EmbeddedType.SelectDefaultBlock };
+    } else if (cmd.eqlLiteral("{/select}")) {
+        return .{ .str = cmd, .kind = EmbeddedType.EndSelectBlock };
     } else if (cmd.eqlLiteral("{}")) {
         return .{ .str = cmd, .kind = EmbeddedType.EmptyBlock };
     } else {

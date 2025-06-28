@@ -90,6 +90,20 @@ pub fn embeddedTextParser(
                 // 空のブロックは無視します
                 _ = iter.next();
             },
+            .SelectBlock => {
+                // selectブロックを解析、最後の埋め込み式が EndSelect であることを確認します
+                const expr = try parseSelectBlock(allocator, store, iter);
+                if (iter.hasNext() and iter.peek().?.kind == .EndSelectBlock) {
+                    exprs.append(expr) catch return ParserError.OutOfMemoryExpression;
+                    _ = iter.next();
+                } else {
+                    return ParserError.SelectBlockNotClosed;
+                }
+            },
+            .SelectCaseBlock, .SelectDefaultBlock, .EndSelectBlock => {
+                // Selectブロックが閉じられていない場合はエラーを返します
+                return ParserError.SelectBlockNotStarted;
+            },
             //else => {
             //    // サポートされていない埋め込み式の場合はエラーを返す
             //    return ParserError.UnsupportedEmbeddedExpression;
@@ -268,7 +282,7 @@ fn parseIfExpression(
             // Elseブロックの実行部を作成
             const inner_expr = try embeddedTextParser(allocator, store, &in_iter);
 
-            // Elseブロックの条件式を作成
+            // Elseブロックの式を作成
             const else_expr = store.get({}) catch return ParserError.OutOfMemoryExpression;
             else_expr.* = .{ .ElseExpress = inner_expr };
             return else_expr;
@@ -332,5 +346,142 @@ fn parseForBlock(
     } else {
         // Forブロックが閉じられていない場合はエラーを返
         return ParserError.ForBlockNotClosed;
+    }
+}
+
+/// Select埋め込み式を解析します。
+/// `parser` は自身のパーサーインスタンスで、`iter` はブロックのイテレータです。
+fn parseSelectBlock(
+    allocator: Allocator,
+    store: *ExpressionStore,
+    iter: *Iterator(Lexical.EmbeddedText),
+) ParserError!*Expression {
+    // 式バッファを生成します
+    var exprs = ArrayList(*Expression).init(allocator);
+    defer exprs.deinit();
+
+    // selectブロックの開始を取得
+    var prev_expr = iter.peek().?;
+    var prev_type = Lexical.EmbeddedType.SelectBlock;
+    _ = iter.next();
+
+    var start: usize = iter.index;
+    var end: usize = iter.index;
+    var lv: u8 = 0;
+    var update = false;
+    while (iter.hasNext()) {
+        const blk = iter.peek().?;
+        switch (blk.kind) {
+            // select が開始された場合、ネストレベルを増やす
+            .SelectBlock => lv += 1,
+
+            // case ブロックを評価
+            .SelectCaseBlock => {
+                if (lv == 0) {
+                    exprs.append(try parseSelectExpression(
+                        allocator,
+                        store,
+                        iter,
+                        prev_expr,
+                        prev_type,
+                        start,
+                        end,
+                    )) catch return ParserError.OutOfMemoryExpression;
+                    prev_expr = blk;
+                    prev_type = .SelectCaseBlock;
+                    update = true;
+                }
+            },
+
+            // defaultブロックを評価
+            .SelectDefaultBlock => {
+                if (lv == 0) {
+                    exprs.append(try parseSelectExpression(
+                        allocator,
+                        store,
+                        iter,
+                        prev_expr,
+                        prev_type,
+                        start,
+                        end,
+                    )) catch return ParserError.OutOfMemoryExpression;
+                    prev_expr = blk;
+                    prev_type = .SelectDefaultBlock;
+                    update = true;
+                }
+            },
+
+            // Selectが終了された場合、ネストレベルを減らす
+            .EndSelectBlock => {
+                if (lv > 0) {
+                    lv -= 1;
+                } else {
+                    // ネストが終了でループも終了
+                    exprs.append(try parseSelectExpression(
+                        allocator,
+                        store,
+                        iter,
+                        prev_expr,
+                        prev_type,
+                        start,
+                        end,
+                    )) catch return ParserError.OutOfMemoryExpression;
+                    break;
+                }
+            },
+            else => {},
+        }
+        _ = iter.next();
+        if (update) {
+            start = iter.index;
+            update = false;
+        }
+        end = iter.index;
+    }
+
+    // select式をリストとして返します
+    const select_expr = store.get({}) catch return ParserError.OutOfMemoryExpression;
+    const select_exprs = exprs.toOwnedSlice() catch return ParserError.OutOfMemoryExpression;
+    select_expr.* = .{ .SelectExpress = select_exprs };
+    return select_expr;
+}
+
+/// select埋め込み式の各式を取得します。
+/// `parser` は自身のパーサーインスタンスで、`iter` はブロックのイテレータです。
+fn parseSelectExpression(
+    allocator: Allocator,
+    store: *ExpressionStore,
+    iter: *Iterator(Lexical.EmbeddedText),
+    prev_condition: Lexical.EmbeddedText,
+    prev_type: Lexical.EmbeddedType,
+    start: usize,
+    end: usize,
+) ParserError!*Expression {
+    // ブロック内の要素のイテレータを作成します
+    var in_iter = Iterator(Lexical.EmbeddedText).init(iter.items[start..end]);
+
+    switch (prev_type) {
+        .SelectBlock, .SelectCaseBlock => {
+            // SelectブロックまたはCaseブロックの式を解析
+            const match_expr = try Parser.directExecutes(allocator, store, &prev_condition.str);
+
+            // Selectブロックの本体部を解析
+            const body_expr = try embeddedTextParser(allocator, store, &in_iter);
+
+            // Select式を作成
+            const sel_expr = store.get({}) catch return ParserError.OutOfMemoryExpression;
+            sel_expr.* = if (prev_type == .SelectBlock) .{ .SelectTopExpress = .{ .expr = match_expr, .body = body_expr } } else .{ .SelectCaseExpress = .{ .expr = match_expr, .body = body_expr } };
+            return sel_expr;
+        },
+        .SelectDefaultBlock => {
+            // DefaultBlockブロックの実行部を作成
+            const body_expr = try embeddedTextParser(allocator, store, &in_iter);
+
+            // Defaultブロックの式を作成
+            const def_expr = store.get({}) catch return ParserError.OutOfMemoryExpression;
+            def_expr.* = .{ .SelectDefaultExpress = body_expr };
+            return def_expr;
+        },
+        else => return ParserError.SelectParseFailed,
     }
 }

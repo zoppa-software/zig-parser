@@ -60,6 +60,16 @@ pub const ParserError = error{
     ForBlockNotStarted,
     /// Forブロックのコレクションが指定されていない場合のエラー
     InvalidForCollection,
+    /// selectブロックが閉じられていない場合のエラー
+    SelectBlockNotClosed,
+    /// selectブロックが開始されていない場合のエラー
+    SelectBlockNotStarted,
+    /// selectブロックの評価式が指定されていない場合のエラー
+    InvalidSelectExpression,
+    /// selectブロックのcaseに値が指定されていない場合のエラー
+    InvalidSelectCaseValue,
+    /// selectブロックの解析に失敗した場合のエラー
+    SelectParseFailed,
 };
 
 /// 変数エラー列挙型

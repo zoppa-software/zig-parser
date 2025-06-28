@@ -160,5 +160,44 @@ pub fn Store(comptime T: type, comptime size: comptime_int, init_T: fn (Allocato
                 deinit_T(self.allocator, item);
             }
         }
+
+        // イテレータ
+        const Iterator = struct {
+            store: *Self,
+            group: usize,
+            index: usize,
+
+            /// イテレータの初期化
+            pub fn deinit(self: *Iterator) void {
+                self.tree.allocator.free(self.hierarchy);
+                self.tree.allocator.free(self.index);
+            }
+
+            /// 次の要素を取得します。
+            pub fn next(iter: *Iterator) ?*T {
+                // 削除済みリストを解放します。
+                while (iter.group < iter.store.instances.len) {
+                    if (iter.index >= size) {
+                        iter.group += 1;
+                        iter.index = 0;
+                    } else {
+                        const idx = iter.index;
+                        iter.index += 1;
+                        return &iter.store.instances[iter.group][idx];
+                    }
+                }
+                return null;
+            }
+        };
+
+        /// イテレータを生成します。
+        /// これはストアの全ての要素を走査するために使用されます。
+        pub fn iterate(self: *Self) !Iterator {
+            return Iterator{
+                .store = self,
+                .group = 0,
+                .index = 0,
+            };
+        }
     };
 }

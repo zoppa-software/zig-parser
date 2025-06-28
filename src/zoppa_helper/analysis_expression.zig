@@ -26,6 +26,7 @@ fn deinitExpression(alloc: Allocator, expr: *AnalysisExpression) void {
         .VariableListExpress => |vlist_expr| alloc.free(vlist_expr),
         .IfExpress => |if_expr| alloc.free(if_expr),
         .ArrayVariableExpress => |array_expr| alloc.free(array_expr),
+        .SelectExpress => |select_expr| alloc.free(select_expr),
         else => {},
     }
 }
@@ -53,6 +54,10 @@ pub const AnalysisExpression = union(enum) {
     ArrayExpress: struct { ident: *AnalysisExpression, index: *AnalysisExpression },
     IdentifierExpress: String,
     ForExpress: struct { var_name: String, collection: *AnalysisExpression, body: *AnalysisExpression },
+    SelectExpress: []*AnalysisExpression,
+    SelectTopExpress: struct { expr: *AnalysisExpression, body: *AnalysisExpression },
+    SelectCaseExpress: struct { expr: *AnalysisExpression, body: *AnalysisExpression },
+    SelectDefaultExpress: *AnalysisExpression,
 
     /// 式を評価して値を取得します。
     pub fn get(self: *const AnalysisExpression, allocator: Allocator, variables: *VariableEnv) Errors!Value {
@@ -65,7 +70,7 @@ pub const AnalysisExpression = union(enum) {
                     const value = try e.get(allocator, variables);
                     defer value.deinit(allocator);
                     if (value.String.len() > 0) {
-                        values.appendUnalignedSlice(value.String.raw()) catch return Errors.OutOfMemoryString;
+                        values.appendSlice(value.String.raw()) catch return Errors.OutOfMemoryString;
                     }
                 }
                 const res = String.newString(allocator, values.items) catch return Errors.OutOfMemoryString;
@@ -181,6 +186,59 @@ pub const AnalysisExpression = union(enum) {
                     else => return Errors.InvalidForCollection,
                 }
                 return .{ .String = String.newString(allocator, values.items) catch return Errors.OutOfMemoryString };
+            },
+            .SelectExpress => |select_expr| {
+                // select式の評価
+                var values = ArrayList(u8).init(allocator);
+                defer values.deinit();
+
+                // 変数環境に階層を追加して、select式の評価を行います。
+                variables.addHierarchy() catch return Errors.AddVariableHierarchyFailed;
+                defer variables.removeHierarchy();
+
+                // トップの式を評価
+                const value = try select_expr[0].SelectTopExpress.expr.get(allocator, variables);
+                defer value.deinit(allocator);
+
+                // トップのラベルを取得
+                const label = try select_expr[0].SelectTopExpress.body.get(allocator, variables);
+                defer label.deinit(allocator);
+                if (label.String.len() > 0) {
+                    values.appendSlice(label.String.raw()) catch return Errors.OutOfMemoryString;
+                }
+
+                // トップレベルの式に基づいて、caseやdefaultを評価
+                for (select_expr[1..]) |case_expr| {
+                    switch (case_expr.*) {
+                        .SelectCaseExpress => |case| {
+                            // caseの値を取得
+                            const case_value = try case.expr.get(allocator, variables);
+                            defer case_value.deinit(allocator);
+
+                            // トップレベルの値とcaseの値を比較
+                            if (try value.equal(&case_value)) {
+                                const bvalue = case.body.get(allocator, variables) catch return Errors.SelectParseFailed;
+                                defer bvalue.deinit(allocator);
+                                if (bvalue.String.len() > 0) {
+                                    values.appendSlice(bvalue.String.raw()) catch return Errors.OutOfMemoryString;
+                                }
+                                break;
+                            }
+                        },
+                        .SelectDefaultExpress => |default_case| {
+                            // defaultの場合、bodyを評価
+                            const dvalue = default_case.get(allocator, variables) catch return Errors.SelectParseFailed;
+                            defer dvalue.deinit(allocator);
+                            if (dvalue.String.len() > 0) {
+                                values.appendSlice(dvalue.String.raw()) catch return Errors.OutOfMemoryString;
+                            }
+                            break;
+                        },
+                        else => return Errors.InvalidSelectExpression,
+                    }
+                }
+                const res = String.newString(allocator, values.items) catch return Errors.OutOfMemoryString;
+                return .{ .String = res };
             },
             .TernaryExpress => |ternary_expr| {
                 // 三項演算子の評価

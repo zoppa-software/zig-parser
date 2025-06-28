@@ -35,13 +35,6 @@ pub const AnalysisValue = union(enum) {
         }
     }
 
-    // 文字列を連結して新しい文字列を生成します。
-    //fn convertNumber(allocator: Allocator, left: *const String, right: f64) String {
-    //    const msg = std.fmt.allocPrint(allocator, "{d}", .{right}) catch return ValueError.NumberConversionFailed;
-    //    defer allocator.free(msg);
-    //    return left.concat(allocator, msg) catch return ValueError.NumberConversionFailed;
-    //}
-
     /// 文字列と実数値を連結して新しい文字列を生成します。
     /// 文字列は、実数値を文字列に変換して連結します。
     fn concatStringToNumber(allocator: Allocator, left: *const String, right: f64) ValueError!String {

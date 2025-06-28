@@ -194,3 +194,22 @@ test "for test" {
     try testing.expectEqualSlices(u8, "{/for}", tokens[1].str.raw());
     try testing.expect(tokens[1].kind == Lexical.EmbeddedType.EndForBlock);
 }
+
+test "select test" {
+    const allocator = std.testing.allocator;
+    const input = String.newAllSlice("{select a}aは1です{case 1}aは2です{/select}");
+    defer input.deinit();
+
+    const tokens = try Lexical.splitEmbeddedText(allocator, &input);
+    defer allocator.free(tokens);
+
+    try testing.expectEqual(5, tokens.len);
+    try testing.expectEqualSlices(u8, "a", tokens[0].str.raw());
+    try testing.expect(tokens[0].kind == Lexical.EmbeddedType.SelectBlock);
+    try testing.expectEqualSlices(u8, "aは1です", tokens[1].str.raw());
+    try testing.expect(tokens[1].kind == Lexical.EmbeddedType.None);
+    try testing.expectEqualSlices(u8, "1", tokens[2].str.raw());
+    try testing.expect(tokens[2].kind == Lexical.EmbeddedType.SelectCaseBlock);
+    try testing.expectEqualSlices(u8, "aは2です", tokens[3].str.raw());
+    try testing.expect(tokens[3].kind == Lexical.EmbeddedType.None);
+}

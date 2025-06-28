@@ -59,13 +59,13 @@ pub const ParseAnswer = struct {
 
         // 変数環境をクローンして、階層を追加します
         // これにより、元の変数環境を変更せずに評価が可能になります
-        var cloned_env = variables.clone() catch return VariableError.OutOfMemoryVariables;
-        defer cloned_env.deinit();
-        cloned_env.addHierarchy() catch return VariableError.OutOfMemoryVariables;
-        defer cloned_env.removeHierarchy();
+        //var cloned_env = variables.clone() catch return VariableError.OutOfMemoryVariables;
+        //defer cloned_env.deinit();
+        variables.addHierarchy() catch return VariableError.OutOfMemoryVariables;
+        defer variables.removeHierarchy();
 
         // ルートの式を評価して値を取得します
-        self.value = try self.root_expr.get(self.allocator, &cloned_env);
+        self.value = try self.root_expr.get(self.allocator, variables);
         return self.value;
     }
 };
