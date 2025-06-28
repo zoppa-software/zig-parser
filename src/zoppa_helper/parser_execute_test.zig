@@ -167,4 +167,8 @@ test "要素式の作成" {
     try std.testing.expectEqual(1.0, ans11.root_expr.ArrayVariableExpress[0].NumberExpress);
     try std.testing.expectEqual(2.0, ans11.root_expr.ArrayVariableExpress[1].NumberExpress);
     try std.testing.expectEqual(3.0, ans11.root_expr.ArrayVariableExpress[2].NumberExpress);
+
+    var ans12 = try Parser.executesFromLiteral(allocator, "now()");
+    defer ans12.deinit();
+    try std.testing.expect(ans12.root_expr.FunctionExpress.name.IdentifierExpress.eqlLiteral("now"));
 }

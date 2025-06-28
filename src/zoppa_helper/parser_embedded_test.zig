@@ -487,3 +487,20 @@ test "select 埋め込み式の解析 - エラーケース" {
     };
     defer result4.deinit();
 }
+
+test "埋め込み式の解析 - 関数呼び出し" {
+    const allocator = std.testing.allocator;
+    var store: ExpressionStore = try ExpressionStore.init(allocator);
+    defer store.deinit();
+
+    // 関数呼び出しの埋め込み式
+    var result = try Parser.translateFromLiteral(allocator, "関数呼び出し #{now()}");
+    defer result.deinit();
+
+    // 変数の登録
+    var variables = try VariableEnv.init(allocator);
+    defer variables.deinit();
+
+    _ = try result.get(&variables);
+    //try std.testing.expectEqualStrings("関数呼び出し ", ans.String.raw());
+}

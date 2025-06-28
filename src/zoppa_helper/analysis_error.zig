@@ -70,6 +70,8 @@ pub const ParserError = error{
     InvalidSelectCaseValue,
     /// selectブロックの解析に失敗した場合のエラー
     SelectParseFailed,
+    /// 関数の呼び出しに失敗した場合のエラー
+    FunctionCallFailed,
 };
 
 /// 変数エラー列挙型

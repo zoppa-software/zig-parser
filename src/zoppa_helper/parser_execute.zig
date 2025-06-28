@@ -221,13 +221,17 @@ fn parseFactor(
                 if (iter.peek()) |next_word| {
                     if (next_word.kind == .LeftParen) {
                         // 関数呼び出しの式
-                        //const expr = try parseParen(allocator, store, iter);
-                        //return expr;
+                        const funcac = store.get({}) catch return ParserError.OutOfMemoryExpression;
+                        const args = try parseFuncArgs(allocator, store, iter);
+                        funcac.* = .{ .FunctionExpress = .{ .name = expr, .args = args } };
+                        _ = iter.next();
+                        return funcac;
                     } else if (next_word.kind == .LeftBracket) {
                         // 配列の要素アクセスの式
                         const arrac = store.get({}) catch return ParserError.OutOfMemoryExpression;
                         const index = try parseBracket(allocator, store, iter);
                         arrac.* = .{ .ArrayExpress = .{ .ident = expr, .index = index } };
+                        _ = iter.next();
                         return arrac;
                     }
                 }
@@ -338,6 +342,51 @@ fn parseArrayVariable(allocator: Allocator, store: *ExpressionStore, iter: *Iter
     const array_exprs = exprs.toOwnedSlice() catch return ParserError.OutOfMemoryExpression;
     array_expr.* = .{ .ArrayVariableExpress = array_exprs };
     return array_expr;
+}
+
+/// ()括弧内の式を解析し、引数リストとして保持します。
+/// この関数は、()括弧内の式を解析し、結果を `Expression` として返します。
+/// ()括弧内の式は、関数の引数に使用されます。
+fn parseFuncArgs(allocator: Allocator, store: *ExpressionStore, iter: *Iterator(Lexical.Word)) ParserError!*Expression {
+    _ = iter.next();
+
+    // ()括弧内の式を走査するためのイテレーターを作成
+    const range = parenBlockParser(.LeftParen, .RightParen, iter);
+    var in_iter = Iterator((Lexical.Word)).init(iter.items[range.start..range.end]);
+
+    // 式を格納するためのArrayListを作成
+    var exprs = ArrayList(*Expression).init(allocator);
+    defer exprs.deinit();
+
+    while (in_iter.hasNext()) {
+        // 配列内の要素を取得
+        const in_expr = try ternaryOperatorParser(allocator, store, &in_iter);
+        exprs.append(in_expr) catch return ParserError.OutOfMemoryExpression;
+
+        // カンマまたは右括弧を判定して配列を評価
+        if (in_iter.hasNext()) {
+            switch (in_iter.peek().?.kind) {
+                .Comma => {
+                    // カンマをスキップ
+                    _ = in_iter.next();
+                },
+                .RightParen => {
+                    // 右括弧が見つかった場合、ループを終了
+                    break;
+                },
+                else => {
+                    // 無効な式
+                    return ParserError.InvalidExpression;
+                },
+            }
+        }
+    }
+
+    // []括弧内の式を作成
+    const args_expr = store.get({}) catch return ParserError.OutOfMemoryExpression;
+    const args_exprs = exprs.toOwnedSlice() catch return ParserError.OutOfMemoryExpression;
+    args_expr.* = .{ .FunctionArgsExpress = args_exprs };
+    return args_expr;
 }
 
 /// 括弧の対応をネストレベルでカウントして判定し、カッコ内の文字列を習得します。

@@ -11,6 +11,7 @@ const Lexical = @import("lexical_analysis.zig");
 const Errors = @import("analysis_error.zig").AnalysisErrors;
 const VariableEnv = @import("variable_environment.zig").VariableEnvironment;
 const Value = @import("analisys_value.zig").AnalysisValue;
+const Functions = @import("function_library.zig");
 
 /// 式のストア
 /// 式のストアは、解析された式を格納するためのストアです。
@@ -27,6 +28,7 @@ fn deinitExpression(alloc: Allocator, expr: *AnalysisExpression) void {
         .IfExpress => |if_expr| alloc.free(if_expr),
         .ArrayVariableExpress => |array_expr| alloc.free(array_expr),
         .SelectExpress => |select_expr| alloc.free(select_expr),
+        .FunctionArgsExpress => |func_expr| alloc.free(func_expr),
         else => {},
     }
 }
@@ -58,6 +60,8 @@ pub const AnalysisExpression = union(enum) {
     SelectTopExpress: struct { expr: *AnalysisExpression, body: *AnalysisExpression },
     SelectCaseExpress: struct { expr: *AnalysisExpression, body: *AnalysisExpression },
     SelectDefaultExpress: *AnalysisExpression,
+    FunctionArgsExpress: []*AnalysisExpression,
+    FunctionExpress: struct { name: *AnalysisExpression, args: *AnalysisExpression },
 
     /// 式を評価して値を取得します。
     pub fn get(self: *const AnalysisExpression, allocator: Allocator, variables: *VariableEnv) Errors!Value {
@@ -313,6 +317,10 @@ pub const AnalysisExpression = union(enum) {
                     },
                     .boolean => |b| .{ .Boolean = b },
                 };
+            },
+            .FunctionExpress => |func_expr| {
+                // 関数式の評価
+                return Functions.callFunction(allocator, variables, func_expr.name, func_expr.args) catch return Errors.FunctionCallFailed;
             },
             else => return Errors.InvalidExpression,
         };
