@@ -344,6 +344,7 @@ fn parseStringLiteral(allocator: Allocator, source: *const String) Errors!String
                 if (iter.peek()) |nc| {
                     if (nc.len == 1 and nc.source[0] == quote.source[0]) {
                         // クォートが連続している場合、バッファに追加
+                        _ = iter.next();
                         buffer.append(nc.source[0]) catch return Errors.StringParseFailed;
                     } else {
                         // クォートが閉じられた場合、ループを終了
